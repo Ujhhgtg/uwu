@@ -164,8 +164,8 @@ pub enum InsertTab {
 
 /// Trait for objects that can be rendered on the canvas
 pub trait CanvasObjectOps {
-    /// Renders the object using the provided painter, offset by `view_offset`
-    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2);
+    /// Renders the object using the provided painter, transformed by view_offset and zoom
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2, zoom: f32);
     /// Returns the axis-aligned bounding rectangle of the object
     fn bounding_box(&self) -> egui::Rect;
     /// Transforms the object using the specified handle and drag parameters
@@ -269,8 +269,9 @@ impl CanvasObjectOps for CanvasImage {
 
     /// Renders the image on the canvas, drawing selection UI if selected
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2, zoom: f32) {
         let img_rect = self.bounding_box().translate(-view_offset);
+        let img_rect = egui::Rect::from_min_size(img_rect.min * zoom, img_rect.size() * zoom);
         painter.image(
             self.texture.id(),
             img_rect,
@@ -355,15 +356,16 @@ impl CanvasObjectOps for CanvasText {
 
     /// Renders the text on the canvas with optional selection UI
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
-        // Draw text using egui's text rendering
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2, zoom: f32) {
+        let pos = (self.pos - view_offset) * zoom;
+        let zoomed_font_size = self.font_size * zoom;
         let text_galley = painter.layout_no_wrap(
             self.text.clone(),
-            egui::FontId::proportional(self.font_size),
+            egui::FontId::proportional(zoomed_font_size),
             self.color,
         );
         let text_shape = egui::epaint::TextShape {
-            pos: self.pos - view_offset,
+            pos,
             galley: text_galley.clone(),
             underline: egui::Stroke::NONE,
             override_text_color: None,
@@ -375,6 +377,8 @@ impl CanvasObjectOps for CanvasText {
 
         if selected {
             let text_rect = self.bounding_box().translate(-view_offset);
+            let text_rect =
+                egui::Rect::from_min_size(text_rect.min * zoom, text_rect.size() * zoom);
             painter.rect_stroke(
                 text_rect,
                 0.0,
@@ -474,20 +478,22 @@ impl CanvasObjectOps for CanvasShape {
 
     /// Renders the shape and optional selection UI
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
-        let p = self.pos - view_offset;
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2, zoom: f32) {
+        let p = (self.pos - view_offset) * zoom;
+        let z_size = self.size * zoom;
+        let stroke = Stroke::new(2.0_f32 * zoom, self.color);
         // Draw the shape itself
         match self.shape_type {
             CanvasShapeType::Line => {
-                let end_point = Pos2::new(p.x + self.size, p.y);
-                painter.line_segment([p, end_point], Stroke::new(2.0_f32, self.color));
+                let end_point = Pos2::new(p.x + z_size, p.y);
+                painter.line_segment([p, end_point], stroke);
             }
             CanvasShapeType::Arrow => {
-                let end_point = Pos2::new(p.x + self.size, p.y);
-                painter.line_segment([p, end_point], Stroke::new(2.0_f32, self.color));
+                let end_point = Pos2::new(p.x + z_size, p.y);
+                painter.line_segment([p, end_point], stroke);
 
                 // 绘制箭头头部
-                let arrow_size = self.size * 0.1;
+                let arrow_size = z_size * 0.1;
                 let arrow_angle = std::f32::consts::PI / 6.0; // 30度
                 let arrow_point1 = Pos2::new(
                     end_point.x - arrow_size * arrow_angle.cos(),
@@ -498,39 +504,36 @@ impl CanvasObjectOps for CanvasShape {
                     end_point.y + arrow_size * arrow_angle.sin(),
                 );
 
-                painter.line_segment([end_point, arrow_point1], Stroke::new(2.0_f32, self.color));
-                painter.line_segment([end_point, arrow_point2], Stroke::new(2.0_f32, self.color));
+                painter.line_segment([end_point, arrow_point1], stroke);
+                painter.line_segment([end_point, arrow_point2], stroke);
             }
             CanvasShapeType::Rectangle => {
-                let rect = egui::Rect::from_min_size(p, egui::vec2(self.size, self.size));
-                painter.rect_stroke(
-                    rect,
-                    0.0,
-                    Stroke::new(2.0_f32, self.color),
-                    egui::StrokeKind::Outside,
-                );
+                let rect = egui::Rect::from_min_size(p, egui::vec2(z_size, z_size));
+                painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
             }
             CanvasShapeType::Triangle => {
-                let half_size = self.size / 2.0;
+                let half_size = z_size / 2.0;
                 let points = [
                     p,
-                    Pos2::new(p.x + self.size, p.y),
+                    Pos2::new(p.x + z_size, p.y),
                     Pos2::new(p.x + half_size, p.y + half_size),
                 ];
                 painter.add(egui::Shape::convex_polygon(
                     points.to_vec(),
                     self.color,
-                    Stroke::new(2.0_f32, self.color),
+                    stroke,
                 ));
             }
             CanvasShapeType::Circle => {
-                painter.circle_stroke(p, self.size / 2.0, Stroke::new(2.0_f32, self.color));
+                painter.circle_stroke(p, z_size / 2.0, stroke);
             }
         }
 
         // Draw selection border and resize handles when selected
         if selected {
             let shape_rect = self.bounding_box().translate(-view_offset);
+            let shape_rect =
+                egui::Rect::from_min_size(shape_rect.min * zoom, shape_rect.size() * zoom);
             painter.rect_stroke(
                 shape_rect,
                 0.0,
@@ -622,12 +625,12 @@ impl CanvasObjectOps for CanvasObject {
 
     /// Delegates painting to the inner object type
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2, zoom: f32) {
         match self {
-            CanvasObject::Stroke(stroke) => stroke.paint(painter, selected, view_offset),
-            CanvasObject::Image(image) => image.paint(painter, selected, view_offset),
-            CanvasObject::Text(text) => text.paint(painter, selected, view_offset),
-            CanvasObject::Shape(shape) => shape.paint(painter, selected, view_offset),
+            CanvasObject::Stroke(stroke) => stroke.paint(painter, selected, view_offset, zoom),
+            CanvasObject::Image(image) => image.paint(painter, selected, view_offset, zoom),
+            CanvasObject::Text(text) => text.paint(painter, selected, view_offset, zoom),
+            CanvasObject::Shape(shape) => shape.paint(painter, selected, view_offset, zoom),
         }
     }
 
@@ -986,20 +989,26 @@ impl CanvasObjectOps for CanvasStroke {
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2, zoom: f32) {
         let color = if selected { Color32::BLUE } else { self.color };
 
-        let offset_points: Vec<Pos2> = self.points.iter().map(|p| *p - view_offset).collect();
+        let offset_points: Vec<Pos2> = self
+            .points
+            .iter()
+            .map(|p| (*p - view_offset) * zoom)
+            .collect();
+        let z_width_first = self.width.first() * zoom / 2.0;
 
         painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
             offset_points[0],
-            self.width.first() / 2.0,
+            z_width_first,
             color,
         )));
         if self.points.len() >= 2 {
+            let z_width_last = self.width.last() * zoom / 2.0;
             painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
                 offset_points[offset_points.len() - 1],
-                self.width.last() / 2.0,
+                z_width_last,
                 color,
             )));
             match &self.width {
@@ -1007,19 +1016,19 @@ impl CanvasObjectOps for CanvasStroke {
                     if self.points.len() == 2 {
                         painter.line_segment(
                             [offset_points[0], offset_points[1]],
-                            Stroke::new(*w, color),
+                            Stroke::new(*w * zoom, color),
                         );
                     } else {
                         let path = egui::epaint::PathShape::line(
                             offset_points.clone(),
-                            Stroke::new(*w, color),
+                            Stroke::new(*w * zoom, color),
                         );
                         painter.add(egui::Shape::Path(path));
                     }
                 }
                 StrokeWidth::Dynamic(widths) => {
                     for i in 0..offset_points.len() - 1 {
-                        let avg_width = (widths[i] + widths[i + 1]) / 2.0;
+                        let avg_width = (widths[i] + widths[i + 1]) / 2.0 * zoom;
                         painter.line_segment(
                             [offset_points[i], offset_points[i + 1]],
                             Stroke::new(avg_width, color),
@@ -1031,6 +1040,8 @@ impl CanvasObjectOps for CanvasStroke {
 
         if selected {
             let stroke_rect = self.bounding_box().translate(-view_offset);
+            let stroke_rect =
+                egui::Rect::from_min_size(stroke_rect.min * zoom, stroke_rect.size() * zoom);
             painter.rect_stroke(
                 stroke_rect,
                 0.0,
@@ -1111,6 +1122,15 @@ pub struct PointerState {
     pub pos: Pos2,
     pub prev_pos: Option<Pos2>,
     pub interaction: PointerInteraction,
+}
+
+/// State for multi-touch pinch-to-zoom gesture
+#[derive(Debug, Clone)]
+pub struct PinchState {
+    pub initial_zoom: f32,
+    pub initial_view_offset: egui::Vec2,
+    pub initial_center_screen: Pos2,
+    pub initial_distance: f32,
 }
 
 #[cfg(feature = "startup_animation")]
@@ -1489,11 +1509,13 @@ pub struct AppState {
     pub history: History,                                // 当前页面的历史记录
     pub pages: Vec<PageState>,                           // 分页
     pub current_page: usize,                             // 当前页码
-    pub pointers: HashMap<u64, PointerState>, // 统一指针状态表 (鼠标 id=0，触控使用 winit touch id)
+    pub pointers: HashMap<u64, PointerState>, // 统一指针状态表 (鼠标 id=0, 触控使用 winit touch id)
     pub brush_color: Color32,                 // 画笔颜色
     pub brush_width: f32,                     // 画笔大小
     pub dynamic_brush_width_mode: DynamicBrushWidthMode, // 动态画笔大小微调
     pub view_offset: egui::Vec2,              // 画布视图偏移 (无限画布)
+    pub view_zoom: f32,                       // 画布视图缩放 (1.0 = 100%)
+    pub pinch_state: Option<PinchState>,      // 双指缩放状态
     pub current_tool: CanvasTool,             // 当前工具
     pub current_insert_tab: InsertTab,        // 插入工具的当前标签页
     pub selected_shape_type: Option<CanvasShapeType>, // 插入形状时选中的形状类型
@@ -1551,6 +1573,8 @@ impl Default for AppState {
             brush_width: 3.0,
             dynamic_brush_width_mode: DynamicBrushWidthMode::default(),
             view_offset: egui::Vec2::ZERO,
+            view_zoom: 1.0,
+            pinch_state: None,
             current_tool: CanvasTool::Brush,
             current_insert_tab: InsertTab::Shape,
             selected_shape_type: None,
@@ -1586,5 +1610,87 @@ impl Default for AppState {
             #[cfg(feature = "startup_animation")]
             startup_animation: None,
         }
+    }
+}
+
+impl AppState {
+    pub const MIN_ZOOM: f32 = 0.1;
+    pub const MAX_ZOOM: f32 = 10.0;
+    pub const ZOOM_STEP: f32 = 0.03;
+
+    /// Initialize pinch-to-zoom state if there are at least two panning pointers
+    pub fn init_pinch_if_two_panning(&mut self) {
+        let panning: Vec<(u64, Pos2)> = self
+            .pointers
+            .iter()
+            .filter_map(|(id, p)| {
+                if let PointerInteraction::Panning { last_pos } = &p.interaction {
+                    Some((*id, *last_pos))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if panning.len() < 2 {
+            return;
+        }
+
+        let (_, s0) = panning[0];
+        let (_, s1) = panning[1];
+        let c = Pos2::new((s0.x + s1.x) / 2.0, (s0.y + s1.y) / 2.0);
+        let d = s0.distance(s1);
+
+        if d < 1.0 {
+            return;
+        }
+
+        self.pinch_state = Some(PinchState {
+            initial_zoom: self.view_zoom,
+            initial_view_offset: self.view_offset,
+            initial_center_screen: c,
+            initial_distance: d,
+        });
+    }
+
+    /// Apply pinch-to-zoom transformation using current pointer positions
+    pub fn apply_pinch_zoom(&mut self) {
+        let panning: Vec<(u64, Pos2)> = self
+            .pointers
+            .iter()
+            .filter_map(|(id, p)| {
+                if let PointerInteraction::Panning { last_pos } = &p.interaction {
+                    Some((*id, *last_pos))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if panning.len() < 2 {
+            self.pinch_state = None;
+            return;
+        }
+
+        let pinch = match &self.pinch_state {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        let (_, s0) = panning[0];
+        let (_, s1) = panning[1];
+        let c_new = Pos2::new((s0.x + s1.x) / 2.0, (s0.y + s1.y) / 2.0);
+        let d_new = s0.distance(s1);
+
+        if d_new < 1.0 {
+            return;
+        }
+
+        let z_new = (pinch.initial_zoom * d_new / pinch.initial_distance)
+            .clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
+        self.view_zoom = z_new;
+        self.view_offset = pinch.initial_view_offset
+            + pinch.initial_center_screen.to_vec2() / pinch.initial_zoom
+            - c_new.to_vec2() / z_new;
     }
 }

@@ -89,7 +89,6 @@ pub fn clear_interaction_state(state: &mut AppState) {
     state.pointers.clear();
     state.shapes_inserted_count = 0;
     state.selected_shape_type = None;
-    state.view_offset = Default::default();
 }
 
 pub fn switch_to_page_state(state: &mut AppState, page_index: usize) {
@@ -101,6 +100,8 @@ pub fn switch_to_page_state(state: &mut AppState, page_index: usize) {
         std::mem::swap(&mut state.canvas, &mut state.pages[page_index].canvas);
         std::mem::swap(&mut state.history, &mut state.pages[page_index].history);
     }
+    state.view_offset = Default::default();
+    state.view_zoom = 1.0;
     clear_interaction_state(state);
 }
 
@@ -111,6 +112,8 @@ pub fn add_new_page_state(state: &mut AppState) {
     state.pages.push(PageState::default());
     let new_idx = state.pages.len() - 1;
     state.current_page = new_idx;
+    state.view_offset = Default::default();
+    state.view_zoom = 1.0;
     clear_interaction_state(state);
 }
 

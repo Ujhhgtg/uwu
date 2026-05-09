@@ -1170,11 +1170,36 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
             if state.current_tool == CanvasTool::Passthrough {
                 ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
             } else if state.current_tool == CanvasTool::Pan {
-                ui.my_label(egui::RichText::new("(在画布上滑动以移动视图)").italics());
+                ui.my_label(
+                    egui::RichText::new("(在画布上滑动以移动视图, 滚轮或双指缩放)").italics(),
+                );
+                ui.my_label("视图操作:");
                 ui.horizontal(|ui| {
-                    ui.my_label("视图操作:");
+                    ui.my_label("全部:");
                     if ui.button("重置").clicked() {
                         state.view_offset = Default::default();
+                        state.view_zoom = 1.0;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.my_label("缩放:");
+                    let mut zoom = state.view_zoom;
+                    let slider = ui.add(
+                        egui::Slider::new(
+                            &mut zoom,
+                            crate::state::AppState::MIN_ZOOM..=crate::state::AppState::MAX_ZOOM,
+                        )
+                        .logarithmic(true),
+                    );
+                    if slider.changed() {
+                        let s = ui.ctx().content_rect().center();
+                        state.view_offset += s.to_vec2() * (1.0 / state.view_zoom - 1.0 / zoom);
+                        state.view_zoom = zoom;
+                    }
+                    if ui.button("重置").clicked() {
+                        let s = ui.ctx().content_rect().center();
+                        state.view_offset += s.to_vec2() * (1.0 / state.view_zoom - 1.0);
+                        state.view_zoom = 1.0;
                     }
                 });
             } else if state.current_tool == CanvasTool::Select {
@@ -1607,15 +1632,19 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
         let painter = ui.painter();
         let content_rect = ui.ctx().content_rect();
         let view_offset = state.view_offset;
+        let zoom = state.view_zoom;
+        let screen_center = content_rect.center();
 
         // 绘制所有对象 (带视图裁剪)
         for (i, object) in state.canvas.objects.iter().enumerate() {
             let selected = state.selected_object_index == Some(i);
             // 对象包围盒完全在视图外则跳过
             let obj_bbox = object.bounding_box();
-            let screen_bbox = obj_bbox.translate(-view_offset);
+            let screen_min = (obj_bbox.min - view_offset) * zoom;
+            let screen_max = (obj_bbox.max - view_offset) * zoom;
+            let screen_bbox = egui::Rect::from_min_max(screen_min, screen_max);
             if screen_bbox.intersects(content_rect) {
-                object.paint(painter, selected, view_offset);
+                object.paint(painter, selected, view_offset, zoom);
             }
         }
 
@@ -1631,18 +1660,21 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 let offset_points: Vec<Pos2> = active_stroke
                     .points
                     .iter()
-                    .map(|p| *p - view_offset)
+                    .map(|p| (*p - view_offset) * zoom)
                     .collect();
+
+                let z_width_first = active_stroke.width.first() * zoom / 2.0;
 
                 painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
                     offset_points[0],
-                    active_stroke.width.first() / 2.0,
+                    z_width_first,
                     color,
                 )));
                 if active_stroke.points.len() >= 2 {
+                    let z_width_last = active_stroke.width.last() * zoom / 2.0;
                     painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
                         offset_points[offset_points.len() - 1],
-                        active_stroke.width.last() / 2.0,
+                        z_width_last,
                         color,
                     )));
                     match &active_stroke.width {
@@ -1650,19 +1682,19 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             if active_stroke.points.len() == 2 {
                                 painter.line_segment(
                                     [offset_points[0], offset_points[1]],
-                                    Stroke::new(*w, color),
+                                    Stroke::new(*w * zoom, color),
                                 );
                             } else {
                                 let path = egui::epaint::PathShape::line(
                                     offset_points.clone(),
-                                    Stroke::new(*w, color),
+                                    Stroke::new(*w * zoom, color),
                                 );
                                 painter.add(egui::Shape::Path(path));
                             }
                         }
                         StrokeWidth::Dynamic(widths) => {
                             for i in 0..offset_points.len() - 1 {
-                                let avg_width = (widths[i] + widths[i + 1]) / 2.0;
+                                let avg_width = (widths[i] + widths[i + 1]) / 2.0 * zoom;
                                 painter.line_segment(
                                     [offset_points[i], offset_points[i + 1]],
                                     Stroke::new(avg_width, color),
@@ -1681,19 +1713,20 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 shape_type,
             } = &pointer.interaction
             {
-                let sp = *start_pos - view_offset;
-                let ep = pointer.pos - view_offset;
+                let sp = (*start_pos - view_offset) * zoom;
+                let ep = (pointer.pos - view_offset) * zoom;
+                let z_stroke = Stroke::new(3.0_f32 * zoom, Color32::WHITE);
                 match shape_type {
                     CanvasShapeType::Line => {
-                        painter.line_segment([sp, ep], Stroke::new(3.0_f32, Color32::WHITE));
-                        painter.circle_filled(sp, 1.5_f32, Color32::WHITE);
-                        painter.circle_filled(ep, 1.5_f32, Color32::WHITE);
+                        painter.line_segment([sp, ep], z_stroke);
+                        painter.circle_filled(sp, 1.5_f32 * zoom, Color32::WHITE);
+                        painter.circle_filled(ep, 1.5_f32 * zoom, Color32::WHITE);
                     }
                     CanvasShapeType::Arrow => {
                         let len = sp.distance(ep);
-                        if len > 1.0 {
+                        if len > 1.0 * zoom {
                             let dir = (ep - sp) / len;
-                            let arrow_size = (len * 0.15).max(10.0);
+                            let arrow_size = (len * 0.15).max(10.0 * zoom);
                             let angle = 30.0_f32.to_radians();
                             let cos = angle.cos();
                             let sin = angle.sin();
@@ -1701,25 +1734,14 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                 egui::vec2(dir.x * cos - dir.y * sin, dir.x * sin + dir.y * cos);
                             let right_dir =
                                 egui::vec2(dir.x * cos + dir.y * sin, -dir.x * sin + dir.y * cos);
-                            painter.line_segment([sp, ep], Stroke::new(3.0_f32, Color32::WHITE));
-                            painter.line_segment(
-                                [ep, ep - left_dir * arrow_size],
-                                Stroke::new(3.0_f32, Color32::WHITE),
-                            );
-                            painter.line_segment(
-                                [ep, ep - right_dir * arrow_size],
-                                Stroke::new(3.0_f32, Color32::WHITE),
-                            );
+                            painter.line_segment([sp, ep], z_stroke);
+                            painter.line_segment([ep, ep - left_dir * arrow_size], z_stroke);
+                            painter.line_segment([ep, ep - right_dir * arrow_size], z_stroke);
                         }
                     }
                     CanvasShapeType::Rectangle => {
                         let rect = Rect::from_two_pos(sp, ep);
-                        painter.rect_stroke(
-                            rect,
-                            0.0,
-                            Stroke::new(3.0_f32, Color32::WHITE),
-                            egui::StrokeKind::Outside,
-                        );
+                        painter.rect_stroke(rect, 0.0, z_stroke, egui::StrokeKind::Outside);
                     }
                     CanvasShapeType::Triangle => {
                         let rect = Rect::from_two_pos(sp, ep);
@@ -1731,13 +1753,13 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         painter.add(egui::Shape::convex_polygon(
                             vec![p1, p2, p3],
                             Color32::TRANSPARENT,
-                            Stroke::new(3.0_f32, Color32::WHITE),
+                            z_stroke,
                         ));
                     }
                     CanvasShapeType::Circle => {
                         let center = sp + (ep - sp) / 2.0;
                         let radius = sp.distance(ep) / 2.0;
-                        painter.circle_stroke(center, radius, Stroke::new(3.0_f32, Color32::WHITE));
+                        painter.circle_stroke(center, radius, z_stroke);
                     }
                 }
             }
@@ -1747,15 +1769,12 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
         if state.show_size_preview {
             let content_rect = ui.ctx().content_rect();
             let pos = content_rect.center();
-            utils::draw_size_preview(
-                painter,
-                pos,
-                match state.current_tool {
-                    CanvasTool::Brush => state.brush_width,
-                    CanvasTool::ObjectEraser | CanvasTool::PixelEraser => state.eraser_size,
-                    _ => unreachable!(),
-                },
-            );
+            let preview_size = match state.current_tool {
+                CanvasTool::Brush => state.brush_width * zoom,
+                CanvasTool::ObjectEraser | CanvasTool::PixelEraser => state.eraser_size * zoom,
+                _ => unreachable!(),
+            };
+            utils::draw_size_preview(painter, pos, preview_size);
         }
 
         // 绘制触控点
@@ -1764,7 +1783,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 if pointer.id == 0 {
                     continue;
                 }
-                let pos = pointer.pos - view_offset;
+                let pos = (pointer.pos - view_offset) * zoom;
                 painter.circle_filled(
                     pos,
                     15.0,
@@ -1808,12 +1827,28 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
             response.interact_pointer_pos()
         };
         // 屏幕坐标 -> 画布坐标
-        let canvas_pos = pointer_pos.map(|p| p + view_offset);
+        let canvas_pos = pointer_pos.map(|p| p / zoom + view_offset);
 
         match state.current_tool {
             CanvasTool::Settings | CanvasTool::Passthrough => {}
 
             CanvasTool::Pan => {
+                // Mouse wheel zoom
+                if !has_touch && response.hovered() {
+                    let scroll = ui.ctx().input(|i| i.smooth_scroll_delta);
+                    if scroll.y != 0.0 {
+                        let new_zoom = (state.view_zoom
+                            * (1.0 + crate::state::AppState::ZOOM_STEP).powf(scroll.y))
+                        .clamp(
+                            crate::state::AppState::MIN_ZOOM,
+                            crate::state::AppState::MAX_ZOOM,
+                        );
+                        // Zoom around cursor (or screen center if cursor not available)
+                        let s = pointer_pos.unwrap_or(screen_center);
+                        state.view_offset += s.to_vec2() * (1.0 / state.view_zoom - 1.0 / new_zoom);
+                        state.view_zoom = new_zoom;
+                    }
+                }
                 if !has_touch {
                     if response.drag_started() {
                         if let Some(screen_pos) = pointer_pos
@@ -1841,7 +1876,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                 pointer.interaction
                             {
                                 let delta = screen_pos - *last_pos;
-                                state.view_offset -= delta;
+                                state.view_offset -= delta / zoom;
                                 *last_pos = screen_pos;
                             }
                             pointer.pos = pos;
@@ -2040,7 +2075,11 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 };
 
                 for pos in eraser_positions {
-                    utils::draw_size_preview(painter, pos - view_offset, state.eraser_size);
+                    utils::draw_size_preview(
+                        painter,
+                        (pos - view_offset) * zoom,
+                        state.eraser_size * zoom,
+                    );
 
                     let mut to_remove = Vec::new();
                     for (i, object) in state.canvas.objects.iter().enumerate().rev() {
@@ -2128,8 +2167,8 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     if matches!(pointer.interaction, PointerInteraction::Erasing) {
                         utils::draw_size_preview(
                             painter,
-                            pointer.pos - view_offset,
-                            state.eraser_size,
+                            (pointer.pos - view_offset) * zoom,
+                            state.eraser_size * zoom,
                         );
                     }
                 }

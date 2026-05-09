@@ -543,6 +543,7 @@ impl ApplicationHandler<()> for App {
                                     },
                                 },
                             );
+                            self.state.init_pinch_if_two_panning();
                         }
                         CanvasTool::Brush => {
                             brush_stroke_start(&mut self.state, id, pos);
@@ -621,15 +622,23 @@ impl ApplicationHandler<()> for App {
                     },
                     TouchPhase::Moved => match self.state.current_tool {
                         CanvasTool::Pan => {
+                            let pinching = self.state.pinch_state.is_some();
                             if let Some(pointer) = self.state.pointers.get_mut(&id) {
                                 if let PointerInteraction::Panning { ref mut last_pos } =
                                     pointer.interaction
                                 {
-                                    let delta = screen_pos - *last_pos;
-                                    self.state.view_offset -= delta;
+                                    if !pinching {
+                                        let delta = screen_pos - *last_pos;
+                                        self.state.view_offset -= delta / self.state.view_zoom;
+                                    }
                                     *last_pos = screen_pos;
                                 }
                                 pointer.pos = pos;
+                            }
+                            if pinching {
+                                self.state.apply_pinch_zoom();
+                            } else {
+                                self.state.init_pinch_if_two_panning();
                             }
                         }
                         CanvasTool::Brush => {
@@ -686,6 +695,17 @@ impl ApplicationHandler<()> for App {
                     TouchPhase::Ended | TouchPhase::Cancelled => match self.state.current_tool {
                         CanvasTool::Pan => {
                             self.state.pointers.remove(&id);
+                            let panning_count = self
+                                .state
+                                .pointers
+                                .values()
+                                .filter(|p| {
+                                    matches!(p.interaction, PointerInteraction::Panning { .. })
+                                })
+                                .count();
+                            if panning_count < 2 {
+                                self.state.pinch_state = None;
+                            }
                         }
                         CanvasTool::Brush => {
                             brush_stroke_end(&mut self.state, id);
