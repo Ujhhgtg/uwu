@@ -19,6 +19,10 @@ cargo build --release  # release
 cargo clippy --release
 ```
 
+## Code Navigation
+
+Use the LSP tool for code navigation whenever possible (you need to read at least one source file to activate LSP tool) — it's more precise than text search for finding definitions, references, symbol locations, and call hierarchies.
+
 ## Architecture
 
 - GUI app using **egui + wgpu + winit**

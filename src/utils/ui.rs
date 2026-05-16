@@ -9,8 +9,8 @@ use winit::window::{Fullscreen, Window};
 use crate::{
     assets,
     state::{
-        AppState, CanvasObject, CanvasShape, CanvasShapeType, CanvasState, CanvasStroke,
-        CanvasTool, PageState, StrokeWidth, ThemeMode, WindowMode,
+        AppState, CanvasObject, CanvasShape, CanvasShapeType, CanvasStroke, CanvasTool, PageState,
+        StrokeWidth, ThemeMode, WindowMode,
     },
 };
 
@@ -96,12 +96,17 @@ pub fn switch_to_page_state(state: &mut AppState, page_index: usize) {
     if old != page_index {
         std::mem::swap(&mut state.canvas, &mut state.pages[old].canvas);
         std::mem::swap(&mut state.history, &mut state.pages[old].history);
+        std::mem::swap(&mut state.view_offset, &mut state.pages[old].view_offset);
+        std::mem::swap(&mut state.view_zoom, &mut state.pages[old].view_zoom);
         state.current_page = page_index;
         std::mem::swap(&mut state.canvas, &mut state.pages[page_index].canvas);
         std::mem::swap(&mut state.history, &mut state.pages[page_index].history);
+        std::mem::swap(
+            &mut state.view_offset,
+            &mut state.pages[page_index].view_offset,
+        );
+        std::mem::swap(&mut state.view_zoom, &mut state.pages[page_index].view_zoom);
     }
-    state.view_offset = Default::default();
-    state.view_zoom = 1.0;
     clear_interaction_state(state);
 }
 
@@ -109,19 +114,24 @@ pub fn add_new_page_state(state: &mut AppState) {
     let old = state.current_page;
     state.pages[old].canvas = std::mem::take(&mut state.canvas);
     state.pages[old].history = std::mem::take(&mut state.history);
+    state.pages[old].view_offset = state.view_offset;
+    state.pages[old].view_zoom = state.view_zoom;
     state.pages.push(PageState::default());
     let new_idx = state.pages.len() - 1;
     state.current_page = new_idx;
-    state.view_offset = Default::default();
-    state.view_zoom = 1.0;
+    state.view_offset = state.pages[new_idx].view_offset;
+    state.view_zoom = state.pages[new_idx].view_zoom;
     clear_interaction_state(state);
 }
 
-pub fn load_canvas_from_file(state: &mut AppState) {
-    match CanvasState::load_from_file_with_dialog() {
-        Ok(canvas) => {
+pub fn load_page_from_file(state: &mut AppState, ctx: &egui::Context) {
+    match PageState::load_from_file_with_dialog(ctx) {
+        Ok(page) => {
             add_new_page_state(state);
-            state.canvas = canvas;
+            state.canvas = page.canvas;
+            state.history = page.history;
+            state.view_offset = page.view_offset;
+            state.view_zoom = page.view_zoom;
             state.show_welcome_window = false;
             state.toasts.success("成功加载画布!");
         }
@@ -131,8 +141,8 @@ pub fn load_canvas_from_file(state: &mut AppState) {
     };
 }
 
-pub fn save_canvas_to_file(toasts: &mut Toasts, canvas: &CanvasState) {
-    match canvas.save_to_file_with_dialog() {
+pub fn save_page_to_file(toasts: &mut Toasts, page: &PageState) {
+    match page.save_to_file_with_dialog() {
         Ok(_) => {
             toasts.success("成功保存画布!");
         }

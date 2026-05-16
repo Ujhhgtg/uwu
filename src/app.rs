@@ -44,7 +44,7 @@ impl App {
             memory_budget_thresholds: Default::default(),
             backend_options: {
                 let mut options = BackendOptions::default();
-                options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual;
+                options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual; // enable DirectComposition for transparency
                 options
             },
             display: None,
@@ -87,19 +87,20 @@ impl App {
                         .with_title("uwu")
                         .with_transparent(true)
                         .with_window_icon({
-                            #[cfg(target_os = "windows")]
+                            #[cfg(windows)]
                             {
-                                let icon = winit_icon.clone();
-                                icon
+                                winit_icon.clone()
                             }
-                            #[cfg(not(target_os = "windows"))]
-                            winit_icon
+                            #[cfg(not(windows))]
+                            {
+                                winit_icon
+                            }
                         }),
                 )
                 .unwrap(),
         );
 
-        #[cfg(target_os = "windows")]
+        #[cfg(windows)]
         {
             use winit::platform::windows::WindowExtWindows;
             window.set_taskbar_icon(winit_icon);
@@ -121,7 +122,7 @@ impl App {
         // window mode
         apply_window_mode(&mut self.state, &window);
 
-        #[cfg(target_os = "windows")]
+        #[cfg(windows)]
         unsafe {
             if let Err(err) = utils::windows::enable_premultiplied_alpha(
                 utils::windows::winit_window_to_hwnd(&window).unwrap(),
@@ -246,23 +247,23 @@ error: failed to enable premultiplied alpha for window: {:?}
             #[cfg(feature = "profiling")]
             profiling::scope!("handle_redraw::ui");
 
-            #[cfg(feature = "startup_animation")]
-            if let Some(anim) = &mut self.state.startup_animation {
-                if !anim.is_finished() {
-                    anim.update(ctx);
-                    anim.draw_fullscreen(ctx);
-                    ctx.request_repaint(); // ensure smooth playback
-                }
-            }
-
-            self.state.toasts.show(ctx);
-
-            #[cfg(feature = "profiling")]
-            puffin_egui::profiler_window(ctx);
-
             if self.state.current_tool != CanvasTool::Passthrough
                 && self.state.screenshot_path.is_none()
             {
+                self.state.toasts.show(ctx);
+
+                #[cfg(feature = "profiling")]
+                puffin_egui::profiler_window(ctx);
+
+                #[cfg(feature = "startup_animation")]
+                if let Some(anim) = &mut self.state.startup_animation {
+                    if !anim.is_finished() {
+                        anim.update(ctx);
+                        anim.draw_fullscreen(ctx);
+                        ctx.request_repaint(); // ensure smooth playback
+                    }
+                }
+
                 if self.state.show_welcome_window {
                     ui::ui_welcome(&mut self.state, ctx);
                 }
@@ -527,11 +528,11 @@ impl ApplicationHandler<()> for App {
                     location.x as f32 / scale_factor,
                     location.y as f32 / scale_factor,
                 );
-                let pos = screen_pos + self.state.view_offset;
+                let pos = screen_pos / self.state.view_zoom + self.state.view_offset;
 
                 match phase {
                     TouchPhase::Started => match self.state.current_tool {
-                        CanvasTool::Pan => {
+                        CanvasTool::View => {
                             self.state.pointers.insert(
                                 id,
                                 PointerState {
@@ -621,7 +622,7 @@ impl ApplicationHandler<()> for App {
                         _ => {}
                     },
                     TouchPhase::Moved => match self.state.current_tool {
-                        CanvasTool::Pan => {
+                        CanvasTool::View => {
                             let pinching = self.state.pinch_state.is_some();
                             if let Some(pointer) = self.state.pointers.get_mut(&id) {
                                 if let PointerInteraction::Panning { ref mut last_pos } =
@@ -693,7 +694,7 @@ impl ApplicationHandler<()> for App {
                         _ => {}
                     },
                     TouchPhase::Ended | TouchPhase::Cancelled => match self.state.current_tool {
-                        CanvasTool::Pan => {
+                        CanvasTool::View => {
                             self.state.pointers.remove(&id);
                             let panning_count = self
                                 .state

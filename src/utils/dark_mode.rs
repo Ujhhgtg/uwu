@@ -6,7 +6,7 @@ pub fn is_dark_mode() -> Option<bool> {
 
 // ─── Windows ────────────────────────────────────────────────────────────────
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 mod platform {
     use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;

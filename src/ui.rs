@@ -20,7 +20,7 @@ use crate::{
         stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start},
         ui::{
             PageAction, UiExtras, add_new_page_state, apply_theme_mode_and_canvas_color,
-            apply_window_mode, clear_interaction_state, load_canvas_from_file, save_canvas_to_file,
+            apply_window_mode, clear_interaction_state, load_page_from_file, save_page_to_file,
             switch_to_page_state,
         },
     },
@@ -61,7 +61,7 @@ pub fn ui_welcome(state: &mut AppState, ctx: &Context) {
                 state.show_welcome_window = false;
             }
             if ui.button("加载画布").clicked() {
-                load_canvas_from_file(state);
+                load_page_from_file(state, ctx);
             }
 
             ui.separator();
@@ -235,10 +235,16 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         ui.horizontal(|ui| {
             ui.my_label("画布持久化:");
             if ui.button("加载").clicked() {
-                load_canvas_from_file(state);
+                load_page_from_file(state, ctx);
             }
             if ui.button("保存").clicked() {
-                save_canvas_to_file(&mut state.toasts, &state.canvas);
+                let page = PageState {
+                    canvas: state.canvas.clone(),
+                    history: state.history.clone(),
+                    view_offset: state.view_offset,
+                    view_zoom: state.view_zoom,
+                };
+                save_page_to_file(&mut state.toasts, &page);
             }
         });
 
@@ -608,7 +614,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
                 // 添加 1000 条笔画
                 for i in 0..1000 {
-                    let mut points = Vec::new();
+                    let mut points = Vec::with_capacity(100);
 
                     // 生成笔画位置
                     let start_x = (i as f32 % 20.0) * 50.0;
@@ -720,6 +726,7 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
                 state.overlay_mode_changed = true;
                 if state.is_overlay_mode {
                     window.set_window_level(WindowLevel::AlwaysOnTop);
+                    state.current_tool = CanvasTool::Passthrough;
                 } else {
                     window.set_window_level(WindowLevel::Normal);
                     state.current_tool = CanvasTool::Brush;
@@ -741,7 +748,7 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
             ui.my_label(format!("FPS: {}", state.fps_counter.current_fps));
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(windows)]
         {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("屏幕键盘").clicked() {
@@ -972,10 +979,7 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
                                         }
 
                                         if ui.button("✓ 保存").clicked() {
-                                            save_canvas_to_file(
-                                                &mut state.toasts,
-                                                &state.pages[i].canvas,
-                                            );
+                                            save_page_to_file(&mut state.toasts, &state.pages[i]);
                                         }
 
                                         if ui
@@ -1082,7 +1086,7 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
                     add_new_page_state(state);
                 }
                 if ui.button("O 加载").clicked() {
-                    load_canvas_from_file(state);
+                    load_page_from_file(state, ctx);
                 }
                 if ui.button("X 关闭").clicked() {
                     state.show_page_management_window = false;
@@ -1113,483 +1117,503 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
         });
 }
 
-pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> Option<Rect> {
+fn ui_toolbar_tools_content(
+    state: &mut AppState,
+    ctx: &Context,
+    ui: &mut Ui,
+    window: &Arc<Window>,
+) {
+    if state.current_tool == CanvasTool::Passthrough {
+        ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
+    } else if state.current_tool == CanvasTool::View {
+        ui.my_label(egui::RichText::new("(在画布上滑动以移动视图, 滚轮或双指缩放)").italics());
+        ui.my_label("视图操作:");
+        ui.horizontal(|ui| {
+            ui.my_label("全部:");
+            if ui.button("重置").clicked() {
+                state.view_offset = Default::default();
+                state.view_zoom = 1.0;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.my_label("移动:");
+            if ui.button("重置").clicked() {
+                state.view_offset = Default::default();
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.my_label("缩放:");
+            let mut zoom = state.view_zoom;
+            let slider = ui.add(
+                egui::Slider::new(
+                    &mut zoom,
+                    crate::state::AppState::MIN_ZOOM..=crate::state::AppState::MAX_ZOOM,
+                )
+                .logarithmic(true),
+            );
+            if slider.changed() {
+                let s = ui.ctx().content_rect().center();
+                state.view_offset += s.to_vec2() * (1.0 / state.view_zoom - 1.0 / zoom);
+                state.view_zoom = zoom;
+            }
+            if ui.button("重置").clicked() {
+                let s = ui.ctx().content_rect().center();
+                state.view_offset += s.to_vec2() * (1.0 / state.view_zoom - 1.0);
+                state.view_zoom = 1.0;
+            }
+        });
+    } else if state.current_tool == CanvasTool::Select {
+        if let Some(selected_idx) = state.selected_object_index {
+            ui.horizontal(|ui| {
+                ui.my_label("对象操作:");
+                if ui.button("删除").clicked() {
+                    // Save state to history before modification
+                    let removed_object = state.canvas.objects.remove(selected_idx);
+                    state
+                        .history
+                        .save_remove_object(selected_idx, removed_object);
+                    state.selected_object_index = None;
+                    state.toasts.success("对象已删除!");
+                }
+                if ui.button("复制").clicked() {
+                    let mut clone = state.canvas.objects[selected_idx].clone();
+                    CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
+                    let index = state.canvas.objects.len();
+                    state.history.save_add_object(index, clone.clone());
+                    state.canvas.objects.push(clone);
+                    state.selected_object_index = Some(index);
+                    state.toasts.success("对象已复制!");
+                }
+                if ui.button("置顶").clicked() && selected_idx < state.canvas.objects.len() - 1 {
+                    // Save state to history before modification
+                    let object = state.canvas.objects.remove(selected_idx);
+                    // Actually move the object to the top (end of the array)
+                    state.canvas.objects.push(object);
+                    state.history.save_add_object(
+                        state.canvas.objects.len() - 1,
+                        state.canvas.objects.last().unwrap().clone(),
+                    );
+                    state.selected_object_index = Some(state.canvas.objects.len() - 1);
+                    state.toasts.success("对象已移至顶部!");
+                }
+                if ui.button("置底").clicked() && selected_idx > 0 {
+                    // Save state to history before modification
+                    let object = state.canvas.objects.remove(selected_idx);
+                    // Actually move the object to the bottom (beginning of the array)
+                    state.canvas.objects.insert(0, object);
+                    state
+                        .history
+                        .save_add_object(0, state.canvas.objects.first().unwrap().clone());
+                    state.selected_object_index = Some(0);
+                    state.toasts.success("对象已移至底部!");
+                }
+
+                if let Some(CanvasObject::Text(text)) =
+                    state.canvas.objects.get(selected_idx).cloned()
+                    && ui.button("栅格化").clicked()
+                {
+                    let strokes = utils::rasterize_text(&text, assets::font_bytes());
+
+                    state.canvas.objects.remove(selected_idx);
+
+                    for stroke in strokes {
+                        let stroke_obj = CanvasObject::Stroke(stroke);
+                        state.canvas.objects.push(stroke_obj.clone());
+
+                        state
+                            .history
+                            .save_add_object(state.canvas.objects.len() - 1, stroke_obj);
+                    }
+
+                    state
+                        .history
+                        .save_remove_object(selected_idx, CanvasObject::Text(text));
+
+                    state.selected_object_index = None;
+                    state.toasts.success("已转换为笔画!");
+                }
+            });
+        } else {
+            ui.my_label(egui::RichText::new("(未选中对象)").italics());
+        }
+    } else if state.current_tool == CanvasTool::Brush {
+        if !state.toolbar_expanded {
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.my_label("颜色:");
+            let old_color = state.brush_color;
+            if ui.color_edit_button_srgba(&mut state.brush_color).changed() {
+                // Drain all active drawing pointers when color changes
+                let drawing_ids: Vec<u64> = state
+                    .pointers
+                    .values()
+                    .filter(|p| matches!(p.interaction, PointerInteraction::Drawing { .. }))
+                    .map(|p| p.id)
+                    .collect();
+                for id in drawing_ids {
+                    if let Some(pointer) = state.pointers.remove(&id)
+                        && let PointerInteraction::Drawing { active_stroke } = pointer.interaction
+                    {
+                        if let StrokeWidth::Dynamic(v) = &active_stroke.width
+                            && v.len() != active_stroke.points.len()
+                        {
+                            continue;
+                        }
+                        state
+                            .canvas
+                            .objects
+                            .push(CanvasObject::Stroke(CanvasStroke {
+                                points: active_stroke.points,
+                                width: active_stroke.width,
+                                color: old_color,
+                                base_width: state.brush_width,
+                                shape: None,
+                            }));
+                    }
+                }
+            }
+        });
+
+        // 颜色快捷按钮
+        ui.horizontal(|ui| {
+            ui.my_label("快捷颜色:");
+            for color in &state.persistent.quick_colors {
+                let color_name = if color.r() == 0 && color.g() == 0 && color.b() == 0 {
+                    "黑"
+                } else if color.r() == 255 && color.g() == 255 && color.b() == 255 {
+                    "白"
+                } else if color.r() == 0 && color.g() == 100 && color.b() == 255 {
+                    "蓝"
+                } else if color.r() == 220 && color.g() == 20 && color.b() == 60 {
+                    "红"
+                } else if color.r() == 34 && color.g() == 139 && color.b() == 34 {
+                    "绿"
+                } else if color.r() == 255 && color.g() == 140 && color.b() == 0 {
+                    "橙"
+                } else {
+                    "自定义"
+                };
+                if ui
+                    .add(egui::Button::new(
+                        egui::RichText::new(color_name).color(*color),
+                    ))
+                    .clicked()
+                {
+                    state.brush_color = *color;
+                }
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.my_label("宽度:");
+            let slider_response = ui.add(egui::Slider::new(&mut state.brush_width, 1.0..=20.0));
+
+            // 显示大小预览
+            if slider_response.dragged() || slider_response.hovered() {
+                state.show_size_preview = true;
+                // 使用屏幕中心位置
+            } else if !slider_response.dragged() && !slider_response.hovered() {
+                state.show_size_preview = false;
+            }
+        });
+
+        // 画笔宽度快捷按钮
+        ui.horizontal(|ui| {
+            ui.my_label("快捷宽度:");
+            if ui.button("小").clicked() {
+                state.brush_width = 1.0;
+            }
+            if ui.button("中").clicked() {
+                state.brush_width = 3.0;
+            }
+            if ui.button("大").clicked() {
+                state.brush_width = 5.0;
+            }
+        });
+    } else if state.current_tool == CanvasTool::ObjectEraser
+        || state.current_tool == CanvasTool::PixelEraser
+    {
+        if !state.toolbar_expanded {
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.my_label("大小:");
+            let slider_response = ui.add(egui::Slider::new(&mut state.eraser_size, 5.0..=50.0));
+
+            // 显示大小预览
+            if slider_response.dragged() || slider_response.hovered() {
+                state.show_size_preview = true;
+            } else if !slider_response.dragged() && !slider_response.hovered() {
+                state.show_size_preview = false;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.my_label("清空:");
+            if ui.button("OK").clicked() {
+                // Save state to history before modification
+                let old_objects = std::mem::take(&mut state.canvas.objects);
+                state.history.save_clear_objects(old_objects);
+                state.pointers.clear();
+                state.selected_object_index = None;
+                state.current_tool = CanvasTool::Brush;
+            }
+        });
+    } else if state.current_tool == CanvasTool::Insert {
+        let prev_insert_tab = state.current_insert_tab;
+
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut state.current_insert_tab, InsertTab::Shape, "形状");
+            ui.selectable_value(&mut state.current_insert_tab, InsertTab::Text, "文本");
+            if ui
+                .selectable_value(&mut state.current_insert_tab, InsertTab::Image, "图片")
+                .clicked()
+            {
+                let path = rfd::FileDialog::new()
+                    .add_filter("图片", IMAGE_FILE_EXTS)
+                    .pick_file();
+                state.current_insert_tab = prev_insert_tab;
+                if let Some(path) = path {
+                    match image::open(path) {
+                        Ok(img) => {
+                            const MAX_TEXTURE_SIZE: u32 = 2048;
+
+                            let img = if img.width() > MAX_TEXTURE_SIZE
+                                || img.height() > MAX_TEXTURE_SIZE
+                            {
+                                utils::resize_image_for_texture(img, MAX_TEXTURE_SIZE)
+                            } else {
+                                img
+                            };
+
+                            let img_rgba = img.to_rgba8();
+                            let (width, height) = img_rgba.dimensions();
+                            let aspect_ratio = width as f32 / height as f32;
+
+                            let target_width = 300.0_f32;
+                            let target_height = target_width / aspect_ratio;
+
+                            let ctx = ui.ctx();
+                            let texture = ctx.load_texture(
+                                "inserted_image",
+                                egui::ColorImage::from_rgba_unmultiplied(
+                                    [width as usize, height as usize],
+                                    &img_rgba,
+                                ),
+                                egui::TextureOptions::LINEAR,
+                            );
+
+                            let image_data: Arc<[u8]> = img_rgba.into_raw().into();
+                            let new_image = CanvasImage {
+                                texture,
+                                pos: Pos2::new(100.0, 100.0),
+                                size: egui::vec2(target_width, target_height),
+                                aspect_ratio,
+                                marked_for_deletion: false,
+
+                                image_data,
+                                image_size: [width, height],
+                            };
+                            let index = state.canvas.objects.len();
+                            state
+                                .history
+                                .save_add_object(index, CanvasObject::Image(new_image.clone()));
+                            state.canvas.objects.push(CanvasObject::Image(new_image));
+
+                            state.current_tool = CanvasTool::Select;
+                        }
+                        Err(err) => {
+                            state.toasts.error(format!("图片插入失败: {}!", err));
+                        }
+                    }
+                } else {
+                    state.toasts.error("图片插入失败: 已取消!");
+                }
+            }
+        });
+
+        match state.current_insert_tab {
+            InsertTab::Shape => {
+                ui.my_label("形状类型:");
+
+                ui.horizontal(|ui| {
+                    let prev = state.selected_shape_type;
+
+                    if ui
+                        .selectable_value(
+                            &mut state.selected_shape_type,
+                            Some(CanvasShapeType::Line),
+                            "线",
+                        )
+                        .clicked()
+                        && prev == Some(CanvasShapeType::Line)
+                    {
+                        state.selected_shape_type = None;
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut state.selected_shape_type,
+                            Some(CanvasShapeType::Arrow),
+                            "箭头",
+                        )
+                        .clicked()
+                        && prev == Some(CanvasShapeType::Arrow)
+                    {
+                        state.selected_shape_type = None;
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut state.selected_shape_type,
+                            Some(CanvasShapeType::Rectangle),
+                            "矩形",
+                        )
+                        .clicked()
+                        && prev == Some(CanvasShapeType::Rectangle)
+                    {
+                        state.selected_shape_type = None;
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut state.selected_shape_type,
+                            Some(CanvasShapeType::Triangle),
+                            "三角形",
+                        )
+                        .clicked()
+                        && prev == Some(CanvasShapeType::Triangle)
+                    {
+                        state.selected_shape_type = None;
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut state.selected_shape_type,
+                            Some(CanvasShapeType::Circle),
+                            "圆形",
+                        )
+                        .clicked()
+                        && prev == Some(CanvasShapeType::Circle)
+                    {
+                        state.selected_shape_type = None;
+                    }
+
+                    if prev != state.selected_shape_type {
+                        state.shapes_inserted_count = 0;
+                    }
+                });
+
+                if state.selected_shape_type.is_some() {
+                    ui.my_label(egui::RichText::new("(在画布上滑动以绘制形状)").italics());
+                }
+
+                ui.checkbox(&mut state.continuous_insert, "连续插入");
+            }
+            InsertTab::Text => {
+                ui.horizontal(|ui| {
+                    ui.my_label("文本内容:");
+                    ui.text_edit_singleline(&mut state.new_text_content);
+                });
+
+                ui.horizontal(|ui| {
+                    if ui.button("确认").clicked() {
+                        let text_size = ui
+                            .painter()
+                            .layout_no_wrap(
+                                state.new_text_content.clone(),
+                                egui::FontId::proportional(16.0),
+                                Color32::WHITE,
+                            )
+                            .size();
+                        let new_text = CanvasText {
+                            text: state.new_text_content.clone(),
+                            pos: Pos2::new(100.0, 100.0),
+                            color: Color32::WHITE,
+                            font_size: 16.0,
+
+                            cached_size: Some(text_size),
+                        };
+                        let index = state.canvas.objects.len();
+                        state
+                            .history
+                            .save_add_object(index, CanvasObject::Text(new_text.clone()));
+                        state.canvas.objects.push(CanvasObject::Text(new_text));
+                        state.current_tool = CanvasTool::Select;
+                        state.new_text_content.clear();
+                    }
+
+                    if ui.button("取消").clicked() {
+                        state.new_text_content.clear();
+                    }
+                });
+            }
+            InsertTab::Image => {}
+        }
+    } else if state.current_tool == CanvasTool::Settings {
+        ui_toolbar_settings(state, ctx, ui, window);
+    }
+}
+
+fn tool_button(state: &mut AppState, ui: &mut Ui, tool: CanvasTool, label: &str) -> bool {
+    let resp = ui.selectable_value(&mut state.current_tool, tool, label);
+    if resp.clicked() && !resp.changed() {
+        state.toolbar_expanded = !state.toolbar_expanded;
+    }
+    resp.changed()
+}
+
+fn ui_toolbar_tools_selector(state: &mut AppState, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        ui.my_label("工具:");
+        // TODO: egui doesn't support rendering fonts with colors
+        let old_tool = state.current_tool;
+        if ((state.is_overlay_mode
+            && ui
+                .selectable_value(&mut state.current_tool, CanvasTool::Passthrough, "穿透")
+                .changed())
+            || ui
+                .selectable_value(&mut state.current_tool, CanvasTool::Select, "选择")
+                .changed()
+            || ui
+                .selectable_value(&mut state.current_tool, CanvasTool::View, "视图")
+                .changed()
+            || tool_button(state, ui, CanvasTool::Brush, "画笔")
+            || tool_button(state, ui, CanvasTool::ObjectEraser, "对象擦")
+            || tool_button(state, ui, CanvasTool::PixelEraser, "像素擦")
+            || ui
+                .selectable_value(&mut state.current_tool, CanvasTool::Insert, "插入")
+                .changed()
+            || ui
+                .selectable_value(&mut state.current_tool, CanvasTool::Settings, "设置")
+                .changed())
+            && state.current_tool != old_tool
+        {
+            clear_interaction_state(state);
+            state.toolbar_expanded = false;
+        }
+    });
+}
+
+pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) {
     let content_rect = ctx.content_rect();
-    let resp = egui::Window::new("工具栏")
+    egui::Window::new("工具栏")
         .resizable(false)
+        .collapsible(false)
+        .movable(true)
         .pivot(egui::Align2::CENTER_BOTTOM)
         .default_pos([content_rect.center().x, content_rect.max.y - 20.0])
         .enabled(!state.show_welcome_window)
+        .title_bar(false)
         .show(ctx, |ui| {
-            // 工具选择
-            ui.horizontal(|ui| {
-                ui.my_label("工具:");
-                // TODO: egui doesn't support rendering fonts with colors
-                let old_tool = state.current_tool;
-                if ((state.is_overlay_mode
-                    && ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Passthrough, "穿透")
-                        .changed())
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Select, "选择")
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Pan, "视图")
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Brush, "画笔")
-                        .changed()
-                    || ui
-                        .selectable_value(
-                            &mut state.current_tool,
-                            CanvasTool::ObjectEraser,
-                            "对象擦",
-                        )
-                        .changed()
-                    || ui
-                        .selectable_value(
-                            &mut state.current_tool,
-                            CanvasTool::PixelEraser,
-                            "像素擦",
-                        )
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Insert, "插入")
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Settings, "设置")
-                        .changed())
-                    && state.current_tool != old_tool
-                {
-                    clear_interaction_state(state);
-                }
-            });
+            ui_toolbar_tools_content(state, ctx, ui, window);
 
-            ui.separator();
-
-            if state.current_tool == CanvasTool::Passthrough {
-                ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
-            } else if state.current_tool == CanvasTool::Pan {
-                ui.my_label(
-                    egui::RichText::new("(在画布上滑动以移动视图, 滚轮或双指缩放)").italics(),
-                );
-                ui.my_label("视图操作:");
-                ui.horizontal(|ui| {
-                    ui.my_label("全部:");
-                    if ui.button("重置").clicked() {
-                        state.view_offset = Default::default();
-                        state.view_zoom = 1.0;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.my_label("缩放:");
-                    let mut zoom = state.view_zoom;
-                    let slider = ui.add(
-                        egui::Slider::new(
-                            &mut zoom,
-                            crate::state::AppState::MIN_ZOOM..=crate::state::AppState::MAX_ZOOM,
-                        )
-                        .logarithmic(true),
-                    );
-                    if slider.changed() {
-                        let s = ui.ctx().content_rect().center();
-                        state.view_offset += s.to_vec2() * (1.0 / state.view_zoom - 1.0 / zoom);
-                        state.view_zoom = zoom;
-                    }
-                    if ui.button("重置").clicked() {
-                        let s = ui.ctx().content_rect().center();
-                        state.view_offset += s.to_vec2() * (1.0 / state.view_zoom - 1.0);
-                        state.view_zoom = 1.0;
-                    }
-                });
-            } else if state.current_tool == CanvasTool::Select {
-                if let Some(selected_idx) = state.selected_object_index {
-                    ui.horizontal(|ui| {
-                        ui.my_label("对象操作:");
-                        if ui.button("删除").clicked() {
-                            // Save state to history before modification
-                            let removed_object = state.canvas.objects.remove(selected_idx);
-                            state
-                                .history
-                                .save_remove_object(selected_idx, removed_object);
-                            state.selected_object_index = None;
-                            state.toasts.success("对象已删除!");
-                        }
-                        if ui.button("复制").clicked() {
-                            let mut clone = state.canvas.objects[selected_idx].clone();
-                            CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
-                            let index = state.canvas.objects.len();
-                            state.history.save_add_object(index, clone.clone());
-                            state.canvas.objects.push(clone);
-                            state.selected_object_index = Some(index);
-                            state.toasts.success("对象已复制!");
-                        }
-                        if ui.button("置顶").clicked()
-                            && selected_idx < state.canvas.objects.len() - 1
-                        {
-                            // Save state to history before modification
-                            let object = state.canvas.objects.remove(selected_idx);
-                            // Actually move the object to the top (end of the array)
-                            state.canvas.objects.push(object);
-                            state.history.save_add_object(
-                                state.canvas.objects.len() - 1,
-                                state.canvas.objects.last().unwrap().clone(),
-                            );
-                            state.selected_object_index = Some(state.canvas.objects.len() - 1);
-                            state.toasts.success("对象已移至顶部!");
-                        }
-                        if ui.button("置底").clicked() && selected_idx > 0 {
-                            // Save state to history before modification
-                            let object = state.canvas.objects.remove(selected_idx);
-                            // Actually move the object to the bottom (beginning of the array)
-                            state.canvas.objects.insert(0, object);
-                            state
-                                .history
-                                .save_add_object(0, state.canvas.objects.first().unwrap().clone());
-                            state.selected_object_index = Some(0);
-                            state.toasts.success("对象已移至底部!");
-                        }
-
-                        if let Some(CanvasObject::Text(text)) =
-                            state.canvas.objects.get(selected_idx).cloned()
-                            && ui.button("栅格化").clicked()
-                        {
-                            let strokes = utils::rasterize_text(&text, assets::font_bytes());
-
-                            state.canvas.objects.remove(selected_idx);
-
-                            for stroke in strokes {
-                                let stroke_obj = CanvasObject::Stroke(stroke);
-                                state.canvas.objects.push(stroke_obj.clone());
-
-                                state
-                                    .history
-                                    .save_add_object(state.canvas.objects.len() - 1, stroke_obj);
-                            }
-
-                            state
-                                .history
-                                .save_remove_object(selected_idx, CanvasObject::Text(text));
-
-                            state.selected_object_index = None;
-                            state.toasts.success("已转换为笔画!");
-                        }
-                    });
-                } else {
-                    ui.my_label(egui::RichText::new("(未选中对象)").italics());
-                }
-            } else if state.current_tool == CanvasTool::Brush {
-                ui.horizontal(|ui| {
-                    ui.my_label("颜色:");
-                    let old_color = state.brush_color;
-                    if ui.color_edit_button_srgba(&mut state.brush_color).changed() {
-                        // Drain all active drawing pointers when color changes
-                        let drawing_ids: Vec<u64> = state
-                            .pointers
-                            .values()
-                            .filter(|p| matches!(p.interaction, PointerInteraction::Drawing { .. }))
-                            .map(|p| p.id)
-                            .collect();
-                        for id in drawing_ids {
-                            if let Some(pointer) = state.pointers.remove(&id)
-                                && let PointerInteraction::Drawing { active_stroke } =
-                                    pointer.interaction
-                            {
-                                if let StrokeWidth::Dynamic(v) = &active_stroke.width
-                                    && v.len() != active_stroke.points.len()
-                                {
-                                    continue;
-                                }
-                                state
-                                    .canvas
-                                    .objects
-                                    .push(CanvasObject::Stroke(CanvasStroke {
-                                        points: active_stroke.points,
-                                        width: active_stroke.width,
-                                        color: old_color,
-                                        base_width: state.brush_width,
-                                        shape: None,
-                                    }));
-                            }
-                        }
-                    }
-                });
-
-                // 颜色快捷按钮
-                ui.horizontal(|ui| {
-                    ui.my_label("快捷颜色:");
-                    for color in &state.persistent.quick_colors {
-                        let color_name = if color.r() == 0 && color.g() == 0 && color.b() == 0 {
-                            "黑"
-                        } else if color.r() == 255 && color.g() == 255 && color.b() == 255 {
-                            "白"
-                        } else if color.r() == 0 && color.g() == 100 && color.b() == 255 {
-                            "蓝"
-                        } else if color.r() == 220 && color.g() == 20 && color.b() == 60 {
-                            "红"
-                        } else if color.r() == 34 && color.g() == 139 && color.b() == 34 {
-                            "绿"
-                        } else if color.r() == 255 && color.g() == 140 && color.b() == 0 {
-                            "橙"
-                        } else {
-                            "自定义"
-                        };
-                        if ui
-                            .add(egui::Button::new(
-                                egui::RichText::new(color_name).color(*color),
-                            ))
-                            .clicked()
-                        {
-                            state.brush_color = *color;
-                        }
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.my_label("宽度:");
-                    let slider_response =
-                        ui.add(egui::Slider::new(&mut state.brush_width, 1.0..=20.0));
-
-                    // 显示大小预览
-                    if slider_response.dragged() || slider_response.hovered() {
-                        state.show_size_preview = true;
-                        // 使用屏幕中心位置
-                    } else if !slider_response.dragged() && !slider_response.hovered() {
-                        state.show_size_preview = false;
-                    }
-                });
-
-                // 画笔宽度快捷按钮
-                ui.horizontal(|ui| {
-                    ui.my_label("快捷宽度:");
-                    if ui.button("小").clicked() {
-                        state.brush_width = 1.0;
-                    }
-                    if ui.button("中").clicked() {
-                        state.brush_width = 3.0;
-                    }
-                    if ui.button("大").clicked() {
-                        state.brush_width = 5.0;
-                    }
-                });
-            } else if state.current_tool == CanvasTool::ObjectEraser
-                || state.current_tool == CanvasTool::PixelEraser
-            {
-                ui.horizontal(|ui| {
-                    ui.my_label("大小:");
-                    let slider_response =
-                        ui.add(egui::Slider::new(&mut state.eraser_size, 5.0..=50.0));
-
-                    // 显示大小预览
-                    if slider_response.dragged() || slider_response.hovered() {
-                        state.show_size_preview = true;
-                    } else if !slider_response.dragged() && !slider_response.hovered() {
-                        state.show_size_preview = false;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.my_label("清空:");
-                    if ui.button("OK").clicked() {
-                        // Save state to history before modification
-                        let old_objects = std::mem::take(&mut state.canvas.objects);
-                        state.history.save_clear_objects(old_objects);
-                        state.pointers.clear();
-                        state.selected_object_index = None;
-                        state.current_tool = CanvasTool::Brush;
-                    }
-                });
-            } else if state.current_tool == CanvasTool::Insert {
-                let prev_insert_tab = state.current_insert_tab;
-
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut state.current_insert_tab, InsertTab::Shape, "形状");
-                    ui.selectable_value(&mut state.current_insert_tab, InsertTab::Text, "文本");
-                    if ui
-                        .selectable_value(&mut state.current_insert_tab, InsertTab::Image, "图片")
-                        .clicked()
-                    {
-                        let path = rfd::FileDialog::new()
-                            .add_filter("图片", IMAGE_FILE_EXTS)
-                            .pick_file();
-                        state.current_insert_tab = prev_insert_tab;
-                        if let Some(path) = path {
-                            match image::open(path) {
-                                Ok(img) => {
-                                    const MAX_TEXTURE_SIZE: u32 = 2048;
-
-                                    let img = if img.width() > MAX_TEXTURE_SIZE
-                                        || img.height() > MAX_TEXTURE_SIZE
-                                    {
-                                        utils::resize_image_for_texture(img, MAX_TEXTURE_SIZE)
-                                    } else {
-                                        img
-                                    };
-
-                                    let img_rgba = img.to_rgba8();
-                                    let (width, height) = img_rgba.dimensions();
-                                    let aspect_ratio = width as f32 / height as f32;
-
-                                    let target_width = 300.0_f32;
-                                    let target_height = target_width / aspect_ratio;
-
-                                    let ctx = ui.ctx();
-                                    let texture = ctx.load_texture(
-                                        "inserted_image",
-                                        egui::ColorImage::from_rgba_unmultiplied(
-                                            [width as usize, height as usize],
-                                            &img_rgba,
-                                        ),
-                                        egui::TextureOptions::LINEAR,
-                                    );
-
-                                    let image_data: Arc<[u8]> = img_rgba.into_raw().into();
-                                    let new_image = CanvasImage {
-                                        texture,
-                                        pos: Pos2::new(100.0, 100.0),
-                                        size: egui::vec2(target_width, target_height),
-                                        aspect_ratio,
-                                        marked_for_deletion: false,
-
-                                        image_data,
-                                        image_size: [width, height],
-                                    };
-                                    let index = state.canvas.objects.len();
-                                    state.history.save_add_object(
-                                        index,
-                                        CanvasObject::Image(new_image.clone()),
-                                    );
-                                    state.canvas.objects.push(CanvasObject::Image(new_image));
-
-                                    state.current_tool = CanvasTool::Select;
-                                }
-                                Err(err) => {
-                                    state.toasts.error(format!("图片插入失败: {}!", err));
-                                }
-                            }
-                        } else {
-                            state.toasts.error("图片插入失败: 已取消!");
-                        }
-                    }
-                });
-
-                match state.current_insert_tab {
-                    InsertTab::Shape => {
-                        ui.my_label("形状类型:");
-
-                        ui.horizontal(|ui| {
-                            let prev = state.selected_shape_type;
-
-                            if ui
-                                .selectable_value(
-                                    &mut state.selected_shape_type,
-                                    Some(CanvasShapeType::Line),
-                                    "线",
-                                )
-                                .clicked()
-                                && prev == Some(CanvasShapeType::Line)
-                            {
-                                state.selected_shape_type = None;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut state.selected_shape_type,
-                                    Some(CanvasShapeType::Arrow),
-                                    "箭头",
-                                )
-                                .clicked()
-                                && prev == Some(CanvasShapeType::Arrow)
-                            {
-                                state.selected_shape_type = None;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut state.selected_shape_type,
-                                    Some(CanvasShapeType::Rectangle),
-                                    "矩形",
-                                )
-                                .clicked()
-                                && prev == Some(CanvasShapeType::Rectangle)
-                            {
-                                state.selected_shape_type = None;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut state.selected_shape_type,
-                                    Some(CanvasShapeType::Triangle),
-                                    "三角形",
-                                )
-                                .clicked()
-                                && prev == Some(CanvasShapeType::Triangle)
-                            {
-                                state.selected_shape_type = None;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut state.selected_shape_type,
-                                    Some(CanvasShapeType::Circle),
-                                    "圆形",
-                                )
-                                .clicked()
-                                && prev == Some(CanvasShapeType::Circle)
-                            {
-                                state.selected_shape_type = None;
-                            }
-
-                            if prev != state.selected_shape_type {
-                                state.shapes_inserted_count = 0;
-                            }
-                        });
-
-                        if state.selected_shape_type.is_some() {
-                            ui.my_label(egui::RichText::new("(在画布上滑动以绘制形状)").italics());
-                        }
-
-                        ui.checkbox(&mut state.continuous_insert, "连续插入");
-                    }
-                    InsertTab::Text => {
-                        ui.horizontal(|ui| {
-                            ui.my_label("文本内容:");
-                            ui.text_edit_singleline(&mut state.new_text_content);
-                        });
-
-                        ui.horizontal(|ui| {
-                            if ui.button("确认").clicked() {
-                                let text_size = ui
-                                    .painter()
-                                    .layout_no_wrap(
-                                        state.new_text_content.clone(),
-                                        egui::FontId::proportional(16.0),
-                                        Color32::WHITE,
-                                    )
-                                    .size();
-                                let new_text = CanvasText {
-                                    text: state.new_text_content.clone(),
-                                    pos: Pos2::new(100.0, 100.0),
-                                    color: Color32::WHITE,
-                                    font_size: 16.0,
-
-                                    cached_size: Some(text_size),
-                                };
-                                let index = state.canvas.objects.len();
-                                state
-                                    .history
-                                    .save_add_object(index, CanvasObject::Text(new_text.clone()));
-                                state.canvas.objects.push(CanvasObject::Text(new_text));
-                                state.current_tool = CanvasTool::Select;
-                                state.new_text_content.clear();
-                            }
-
-                            if ui.button("取消").clicked() {
-                                state.new_text_content.clear();
-                            }
-                        });
-                    }
-                    InsertTab::Image => {}
-                }
-            } else if state.current_tool == CanvasTool::Settings {
-                ui_toolbar_settings(state, ctx, ui, window);
+            let show_sep = !matches!(
+                state.current_tool,
+                CanvasTool::Brush | CanvasTool::ObjectEraser | CanvasTool::PixelEraser
+            ) || state.toolbar_expanded;
+            if show_sep {
+                ui.separator();
             }
+
+            ui_toolbar_tools_selector(state, ui);
 
             ui.separator();
 
@@ -1599,12 +1623,6 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
 
             ui_window_controls(state, ui, window);
         });
-
-    if !state.is_overlay_mode {
-        return None; // avoid useless calculation
-    }
-
-    Some(resp.unwrap().response.rect)
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -1622,10 +1640,10 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
     CentralPanel::default().show_inside(&mut panel_ui, |ui| {
         let (rect, response) = ui.allocate_exact_size(
             ui.available_size(),
-            if state.persistent.low_latency_mode {
-                Sense::drag()
-            } else {
+            if !state.persistent.low_latency_mode {
                 Sense::click_and_drag()
+            } else {
+                Sense::drag()
             },
         );
 
@@ -1832,7 +1850,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
         match state.current_tool {
             CanvasTool::Settings | CanvasTool::Passthrough => {}
 
-            CanvasTool::Pan => {
+            CanvasTool::View => {
                 // Mouse wheel zoom
                 if !has_touch && response.hovered() {
                     let scroll = ui.ctx().input(|i| i.smooth_scroll_delta);
@@ -2204,16 +2222,19 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
                             // Interpolate shape strokes for finer eraser granularity
                             let (points, widths) = if stroke.shape.is_some() {
-                                let step = 5.0_f32;
-                                let mut new_pts = Vec::new();
-                                let mut new_w = Vec::new();
+                                const STEP: f32 = 5.0;
+                                let w = stroke.width.first();
+
+                                let estimated = stroke.points.len() * 4;
+                                let mut new_pts = Vec::with_capacity(estimated);
+                                let mut new_w = Vec::with_capacity(estimated);
+
                                 for i in 0..stroke.points.len() - 1 {
                                     let p1 = stroke.points[i];
                                     let p2 = stroke.points[i + 1];
-                                    let w = stroke.width.first();
                                     let dist = p1.distance(p2);
-                                    if dist > step {
-                                        let num = (dist / step).ceil() as usize;
+                                    if dist > STEP {
+                                        let num = (dist / STEP).ceil() as usize;
                                         for j in 0..num {
                                             let t = j as f32 / num as f32;
                                             new_pts.push(p1.lerp(p2, t));

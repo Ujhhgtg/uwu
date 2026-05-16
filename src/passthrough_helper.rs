@@ -31,7 +31,7 @@ impl App {
             .with_resizable(false)
             .with_decorations(false);
 
-        #[cfg(target_os = "windows")]
+        #[cfg(windows)]
         {
             use winit::platform::windows::WindowAttributesExtWindows;
             attrs = attrs.with_skip_taskbar(true);

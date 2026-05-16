@@ -38,7 +38,7 @@ fn main() {
     }
 
     // --- 2. executable icon (windows only) ---
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     {
         let mut res = winres::WindowsResource::new();
         res.set_icon("./assets/images/app_icon/icon.ico");

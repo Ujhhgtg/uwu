@@ -1,7 +1,5 @@
 pub mod flat;
 
-use flat::CanvasStateFlat;
-
 use egui::{Color32, Pos2, Stroke};
 use egui_notify::Toasts;
 use serde::{Deserialize, Serialize};
@@ -29,11 +27,11 @@ use crate::utils;
 
 /// Magic header for canvas files: `b"UWU"` followed by format version byte.
 /// Must be kept in sync with [`CANVAS_FILE_HEADER`].
-const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
-const CANVAS_FILE_VERSION: u8 = 2;
-const CANVAS_FILE_EXT: &str = "owo"; // open whiteboard objects
+pub(crate) const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
+pub(crate) const CANVAS_FILE_VERSION: u8 = 3;
+pub(crate) const CANVAS_FILE_EXT: &str = "owo"; // open whiteboard objects
 
-fn make_canvas_file_header() -> [u8; 4] {
+pub(crate) fn make_canvas_file_header() -> [u8; 4] {
     let mut h = [0u8; 4];
     h[..3].copy_from_slice(CANVAS_FILE_MAGIC);
     h[3] = CANVAS_FILE_VERSION;
@@ -146,7 +144,7 @@ pub enum CanvasTool {
     Select,      // Select and manipulate objects
     #[default]
     Brush, // Draw freehand strokes
-    Pan,         // Pan/move the canvas view
+    View,        // Move/zoom the canvas view
     ObjectEraser, // Delete entire objects
     PixelEraser, // Erase pixel by pixel
     Insert,      // Insert images, text, or shapes
@@ -706,86 +704,26 @@ pub struct CanvasState {
 }
 
 /// State for a single page including canvas and undo/redo history
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PageState {
     pub canvas: CanvasState,
     pub history: History,
+    pub view_offset: egui::Vec2,
+    pub view_zoom: f32,
 }
 
-impl CanvasState {
-    const HEADER_SIZE: usize = 4;
-
-    /// Loads canvas state from a file using rkyv binary format
-    pub fn load_from_file(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let bytes = std::fs::read(path)?;
-
-        if bytes.len() < Self::HEADER_SIZE
-            || bytes[..3] != *CANVAS_FILE_MAGIC
-            || bytes[3] != CANVAS_FILE_VERSION
-        {
-            let actual = if bytes.len() >= 4 {
-                format!("magic={:02x?}, version={}", &bytes[..3], bytes[3])
-            } else {
-                format!("too short ({} bytes)", bytes.len())
-            };
-            return Err(format!(
-                "unsupported canvas file format: expected magic=UWU, version={CANVAS_FILE_VERSION}, got {actual}"
-            )
-            .into());
+impl Default for PageState {
+    fn default() -> Self {
+        Self {
+            canvas: CanvasState::default(),
+            history: History::default(),
+            view_offset: egui::Vec2::ZERO,
+            view_zoom: 1.0,
         }
-
-        let payload = &bytes[Self::HEADER_SIZE..];
-        let archived = rkyv::access::<flat::ArchivedCanvasStateFlat, rkyv::rancor::Error>(payload)
-            .map_err(|e| format!("rkyv error: {e}"))?;
-        Ok(Self::from(archived))
-    }
-
-    /// Saves canvas state to a file using rkyv binary format
-    pub fn save_to_file(
-        &self,
-        path: &std::path::PathBuf,
-    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let flat = CanvasStateFlat::from(self);
-        let payload =
-            rkyv::to_bytes::<rkyv::rancor::Error>(&flat).map_err(|e| format!("rkyv error: {e}"))?;
-
-        let header = make_canvas_file_header();
-        let mut out = Vec::with_capacity(Self::HEADER_SIZE + payload.len());
-        out.extend_from_slice(&header);
-        out.extend_from_slice(payload.as_slice());
-
-        std::fs::write(path, out)?;
-        Ok(())
-    }
-
-    /// Opens a file dialog to load canvas from user-selected file
-    pub fn load_from_file_with_dialog() -> Result<Self, Box<dyn std::error::Error>> {
-        let path = rfd::FileDialog::new()
-            .add_filter("画布文件", &[CANVAS_FILE_EXT])
-            .pick_file()
-            .ok_or(std::io::Error::new(
-                std::io::ErrorKind::InvalidFilename,
-                "已取消",
-            ))?;
-        let canvas = CanvasState::load_from_file(&path)?;
-        Ok(canvas)
-    }
-
-    /// Opens a file dialog to save canvas to user-selected file
-    pub fn save_to_file_with_dialog(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let path = rfd::FileDialog::new()
-            .add_filter("画布文件", &[CANVAS_FILE_EXT])
-            .set_file_name(format!("canvas.{}", CANVAS_FILE_EXT))
-            .save_file()
-            .ok_or(std::io::Error::new(
-                std::io::ErrorKind::InvalidFilename,
-                "已取消",
-            ))?;
-
-        self.save_to_file(&path)?;
-        Ok(())
     }
 }
+
+impl CanvasState {}
 
 // 应用程序设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -992,47 +930,50 @@ impl CanvasObjectOps for CanvasStroke {
     fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2, zoom: f32) {
         let color = if selected { Color32::BLUE } else { self.color };
 
-        let offset_points: Vec<Pos2> = self
-            .points
-            .iter()
-            .map(|p| (*p - view_offset) * zoom)
-            .collect();
+        let first_point = (self.points[0] - view_offset) * zoom;
         let z_width_first = self.width.first() * zoom / 2.0;
 
         painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-            offset_points[0],
+            first_point,
             z_width_first,
             color,
         )));
         if self.points.len() >= 2 {
+            let last_point = (self.points[self.points.len() - 1] - view_offset) * zoom;
             let z_width_last = self.width.last() * zoom / 2.0;
             painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-                offset_points[offset_points.len() - 1],
+                last_point,
                 z_width_last,
                 color,
             )));
             match &self.width {
                 StrokeWidth::Fixed(w) => {
                     if self.points.len() == 2 {
+                        let second_point = (self.points[1] - view_offset) * zoom;
                         painter.line_segment(
-                            [offset_points[0], offset_points[1]],
+                            [first_point, second_point],
                             Stroke::new(*w * zoom, color),
                         );
                     } else {
+                        let path_points: Vec<Pos2> = self
+                            .points
+                            .iter()
+                            .map(|p| (*p - view_offset) * zoom)
+                            .collect();
                         let path = egui::epaint::PathShape::line(
-                            offset_points.clone(),
+                            path_points,
                             Stroke::new(*w * zoom, color),
                         );
                         painter.add(egui::Shape::Path(path));
                     }
                 }
                 StrokeWidth::Dynamic(widths) => {
-                    for i in 0..offset_points.len() - 1 {
+                    for (i, (p1, p2)) in self.points.iter().zip(self.points[1..].iter()).enumerate()
+                    {
+                        let p1 = (*p1 - view_offset) * zoom;
+                        let p2 = (*p2 - view_offset) * zoom;
                         let avg_width = (widths[i] + widths[i + 1]) / 2.0 * zoom;
-                        painter.line_segment(
-                            [offset_points[i], offset_points[i + 1]],
-                            Stroke::new(avg_width, color),
-                        );
+                        painter.line_segment([p1, p2], Stroke::new(avg_width, color));
                     }
                 }
             }
@@ -1288,16 +1229,16 @@ pub struct ObjectTransform {
 // 历史记录结构
 #[derive(Debug, Clone)]
 pub struct History {
-    undo_stack: Vec<HistoryCommand>,
-    redo_stack: Vec<HistoryCommand>,
-    max_history_size: usize,
+    pub undo_stack: Vec<HistoryCommand>,
+    pub redo_stack: Vec<HistoryCommand>,
+    pub max_history_size: usize,
 }
 
 impl History {
     pub fn new(max_history_size: usize) -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: Vec::with_capacity(max_history_size),
+            redo_stack: Vec::with_capacity(max_history_size),
             max_history_size,
         }
     }
@@ -1531,6 +1472,7 @@ pub struct AppState {
     pub show_quick_color_edit_window: bool, // 是否显示快捷颜色编辑器
     pub show_welcome_window: bool,
     pub show_page_management_window: bool,
+    pub toolbar_expanded: bool,
 
     pub show_size_preview: bool,
     pub new_text_content: String,
@@ -1566,14 +1508,14 @@ impl Default for AppState {
         let default_page = PageState::default();
         Self {
             canvas: default_page.canvas.clone(),
-            pages: vec![default_page],
+            pages: vec![default_page.clone()],
             current_page: 0,
             pointers: HashMap::new(),
             brush_color: Color32::WHITE,
             brush_width: 3.0,
             dynamic_brush_width_mode: DynamicBrushWidthMode::default(),
-            view_offset: egui::Vec2::ZERO,
-            view_zoom: 1.0,
+            view_offset: default_page.view_offset,
+            view_zoom: default_page.view_zoom,
             pinch_state: None,
             current_tool: CanvasTool::Brush,
             current_insert_tab: InsertTab::Shape,
@@ -1593,6 +1535,7 @@ impl Default for AppState {
             show_touch_points: false,
             show_welcome_window: true,
             show_page_management_window: false,
+            toolbar_expanded: false,
             persistent: PersistentState::load_from_file(),
             screenshot_path: None,
             toasts: Toasts::default()

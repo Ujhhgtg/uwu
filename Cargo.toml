@@ -1,7 +1,7 @@
 [package]
 name = "uwu"
 description = "A powerful digital whiteboard built with Rust, winit, egui, and wgpu."
-version = "0.4.1"
+version = "0.4.2"
 authors = ["Fey Xie <feyxiexzf@gmail.com>"]
 edition = "2024"
 repository = "https://github.com/Ujhhgtg/uwu/"
@@ -13,6 +13,7 @@ startup_animation = ["rodio"]
 embedded_font = []
 system_font = ["fontdb"]
 profiling = ["dep:profiling", "puffin", "puffin_egui"]
+mimalloc = ["dep:mimalloc"]
 
 [dependencies]
 # ui & render
@@ -64,6 +65,7 @@ profiling = { version = "*", optional = true, features = [
 ] }
 puffin = { version = "*", optional = true }
 puffin_egui = { version = "*", optional = true }
+mimalloc = { version = "*", optional = true }
 
 [patch.crates-io]
 puffin = { git = "https://github.com/EmbarkStudios/puffin" }      # crates.io version uses out-of-date egui
@@ -80,7 +82,7 @@ egui-winit = { version = "0.34", default-features = false, features = [
 winit = { version = "0.30", default-features = false, features = ["wayland"] }
 egui-wgpu = { version = "0.34", features = ["wayland"] }
 
-[target.'cfg(target_os = "windows")'.dependencies]
+[target.'cfg(windows)'.dependencies]
 windows = { version = "*", features = [
     "Win32_System_Console",
     "Win32_System_Com",

@@ -10,6 +10,13 @@ use std::backtrace::Backtrace;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 
+#[cfg(feature = "mimalloc")]
+use mimalloc::MiMalloc;
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 #[cfg(not(target_os = "android"))]
 fn main() {
     #[cfg(target_os = "linux")]

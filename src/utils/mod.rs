@@ -2,7 +2,7 @@ pub mod dark_mode;
 pub mod stroke;
 pub mod ui;
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 #[allow(non_snake_case)]
 pub mod windows;
 
@@ -109,7 +109,7 @@ pub fn apply_point_interpolation_in_place(
 
     match width {
         StrokeWidth::Fixed(w) => {
-            let mut interpolated = Vec::new();
+            let mut interpolated = Vec::with_capacity(points.len());
 
             for i in 0..points.len() - 1 {
                 let p1 = points[i];
@@ -136,8 +136,8 @@ pub fn apply_point_interpolation_in_place(
             StrokeWidth::Fixed(*w)
         }
         StrokeWidth::Dynamic(widths) => {
-            let mut interpolated_points = Vec::new();
-            let mut interpolated_widths = Vec::new();
+            let mut interpolated_points = Vec::with_capacity(points.len());
+            let mut interpolated_widths = Vec::with_capacity(points.len());
 
             for i in 0..points.len() - 1 {
                 let p1 = points[i];
@@ -172,97 +172,6 @@ pub fn apply_point_interpolation_in_place(
             interpolated_widths.into()
         }
     }
-}
-
-#[must_use]
-#[cfg_attr(feature = "profiling", profiling::function)]
-pub fn apply_stroke_smoothing(points: &[Pos2]) -> Vec<Pos2> {
-    if points.len() < 3 {
-        return points.to_vec();
-    }
-
-    // -----------------------------
-    // 1. Distance-based resampling
-    // -----------------------------
-    let target_spacing = 2.0; // pixels; tune for device DPI
-    let mut resampled = Vec::new();
-
-    resampled.push(points[0]);
-    let mut acc_dist = 0.0;
-
-    for i in 1..points.len() {
-        let prev = points[i - 1];
-        let curr = points[i];
-        let dx = curr.x - prev.x;
-        let dy = curr.y - prev.y;
-        let dist = (dx * dx + dy * dy).sqrt();
-
-        acc_dist += dist;
-
-        if acc_dist >= target_spacing {
-            resampled.push(curr);
-            acc_dist = 0.0;
-        }
-    }
-
-    if resampled.len() < 3 {
-        return resampled;
-    }
-
-    // --------------------------------
-    // 2. Chaikin corner cutting
-    // --------------------------------
-    let mut smoothed = resampled;
-
-    let iterations = 2; // 2–3 recommended for real-time strokes
-
-    for _ in 0..iterations {
-        let mut next = Vec::with_capacity(smoothed.len() * 2);
-        next.push(smoothed[0]);
-
-        for i in 0..smoothed.len() - 1 {
-            let p0 = smoothed[i];
-            let p1 = smoothed[i + 1];
-
-            let q = Pos2 {
-                x: 0.75 * p0.x + 0.25 * p1.x,
-                y: 0.75 * p0.y + 0.25 * p1.y,
-            };
-            let r = Pos2 {
-                x: 0.25 * p0.x + 0.75 * p1.x,
-                y: 0.25 * p0.y + 0.75 * p1.y,
-            };
-
-            next.push(q);
-            next.push(r);
-        }
-
-        next.push(*smoothed.last().unwrap());
-        smoothed = next;
-    }
-
-    // --------------------------------
-    // 3. Light moving-average cleanup
-    // --------------------------------
-    let len = smoothed.len();
-    let mut final_points = Vec::with_capacity(len);
-
-    if len > 0 {
-        final_points.push(smoothed[0]);
-    }
-
-    for i in 1..smoothed.len() - 1 {
-        final_points.push(Pos2 {
-            x: (smoothed[i - 1].x + smoothed[i].x + smoothed[i + 1].x) / 3.0,
-            y: (smoothed[i - 1].y + smoothed[i].y + smoothed[i + 1].y) / 3.0,
-        });
-    }
-
-    if len > 1 {
-        final_points.push(smoothed[len - 1]);
-    }
-
-    final_points
 }
 
 // 判断笔画是否近似一条直线

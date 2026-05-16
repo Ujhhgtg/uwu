@@ -138,7 +138,7 @@ pub fn brush_stroke_end(state: &mut AppState, pointer_id: u64) {
     };
 
     let mut final_points = if state.persistent.stroke_smoothing {
-        super::apply_stroke_smoothing(&active_stroke.points)
+        apply_stroke_smoothing(&active_stroke.points)
     } else {
         active_stroke.points
     };
@@ -161,4 +161,95 @@ pub fn brush_stroke_end(state: &mut AppState, pointer_id: u64) {
         .history
         .save_add_object(index, CanvasObject::Stroke(new_stroke.clone()));
     state.canvas.objects.push(CanvasObject::Stroke(new_stroke));
+}
+
+#[must_use]
+#[cfg_attr(feature = "profiling", profiling::function)]
+fn apply_stroke_smoothing(points: &[Pos2]) -> Vec<Pos2> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+
+    // -----------------------------
+    // 1. Distance-based resampling
+    // -----------------------------
+    let target_spacing = 2.0; // pixels; tune for device DPI
+    let mut resampled = Vec::with_capacity(points.len());
+
+    resampled.push(points[0]);
+    let mut acc_dist = 0.0;
+
+    for i in 1..points.len() {
+        let prev = points[i - 1];
+        let curr = points[i];
+        let dx = curr.x - prev.x;
+        let dy = curr.y - prev.y;
+        let dist = (dx * dx + dy * dy).sqrt();
+
+        acc_dist += dist;
+
+        if acc_dist >= target_spacing {
+            resampled.push(curr);
+            acc_dist = 0.0;
+        }
+    }
+
+    if resampled.len() < 3 {
+        return resampled;
+    }
+
+    // --------------------------------
+    // 2. Chaikin corner cutting
+    // --------------------------------
+    let mut smoothed = resampled;
+
+    let iterations = 2; // 2–3 recommended for real-time strokes
+
+    for _ in 0..iterations {
+        let mut next = Vec::with_capacity(smoothed.len() * 2);
+        next.push(smoothed[0]);
+
+        for i in 0..smoothed.len() - 1 {
+            let p0 = smoothed[i];
+            let p1 = smoothed[i + 1];
+
+            let q = Pos2 {
+                x: 0.75 * p0.x + 0.25 * p1.x,
+                y: 0.75 * p0.y + 0.25 * p1.y,
+            };
+            let r = Pos2 {
+                x: 0.25 * p0.x + 0.75 * p1.x,
+                y: 0.25 * p0.y + 0.75 * p1.y,
+            };
+
+            next.push(q);
+            next.push(r);
+        }
+
+        next.push(*smoothed.last().unwrap());
+        smoothed = next;
+    }
+
+    // --------------------------------
+    // 3. Light moving-average cleanup
+    // --------------------------------
+    let len = smoothed.len();
+    let mut final_points = Vec::with_capacity(len);
+
+    if len > 0 {
+        final_points.push(smoothed[0]);
+    }
+
+    for i in 1..smoothed.len() - 1 {
+        final_points.push(Pos2 {
+            x: (smoothed[i - 1].x + smoothed[i].x + smoothed[i + 1].x) / 3.0,
+            y: (smoothed[i - 1].y + smoothed[i].y + smoothed[i + 1].y) / 3.0,
+        });
+    }
+
+    if len > 1 {
+        final_points.push(smoothed[len - 1]);
+    }
+
+    final_points
 }

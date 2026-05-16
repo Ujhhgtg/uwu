@@ -1,0 +1,9 @@
+[target.x86_64-pc-windows-gnullvm]
+linker = "x86_64-w64-mingw32-clang"
+ar = "x86_64-w64-mingw32-ar"
+rustflags = ["-Ctarget-feature=+crt-static"]
+
+[target.aarch64-pc-windows-gnullvm]
+linker = "aarch64-w64-mingw32-clang"
+ar = "aarch64-w64-mingw32-ar"
+rustflags = ["-Ctarget-feature=+crt-static"]

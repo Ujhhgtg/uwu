@@ -86,18 +86,6 @@ jobs:
                   sudo mkdir -p /opt/llvm-mingw
                   curl -L "https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64.tar.xz" | sudo tar xJ -C /opt/llvm-mingw --strip-components=1
                   echo "/opt/llvm-mingw/bin" >> "$GITHUB_PATH"
-                  mkdir -p ~/.cargo
-                  cat >> ~/.cargo/config.toml << 'EOF'
-                  [target.x86_64-pc-windows-gnullvm]
-                  linker = "x86_64-w64-mingw32-clang"
-                  ar = "x86_64-w64-mingw32-ar"
-                  rustflags = ["-Ctarget-feature=+crt-static"]
-
-                  [target.aarch64-pc-windows-gnullvm]
-                  linker = "aarch64-w64-mingw32-clang"
-                  ar = "aarch64-w64-mingw32-ar"
-                  rustflags = ["-Ctarget-feature=+crt-static"]
-                  EOF
 
             - name: Add Rust target (cross-compile)
               if: matrix.target
