@@ -66,6 +66,7 @@ profiling = { version = "*", optional = true, features = [
 puffin = { version = "*", optional = true }
 puffin_egui = { version = "*", optional = true }
 mimalloc = { version = "*", optional = true }
+interprocess = "*"
 
 [patch.crates-io]
 puffin = { git = "https://github.com/EmbarkStudios/puffin" }      # crates.io version uses out-of-date egui

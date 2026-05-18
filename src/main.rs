@@ -2,6 +2,7 @@ mod app;
 mod assets;
 mod passthrough_helper;
 mod render;
+mod single_instance;
 mod state;
 mod ui;
 mod utils;
@@ -21,6 +22,11 @@ static GLOBAL: MiMalloc = MiMalloc;
 fn main() {
     #[cfg(target_os = "linux")]
     utils::linux::silence_glib_logs();
+
+    #[cfg(windows)]
+    unsafe {
+        let _ = windows::Win32::System::Console::FreeConsole();
+    }
 
     #[cfg(feature = "profiling")]
     puffin::set_scopes_on(true);
@@ -56,6 +62,17 @@ fn main() {
 
 #[cfg(not(target_os = "android"))]
 async fn run_desktop() {
+    match single_instance::check() {
+        Ok(single_instance::SingleInstance::NotFirst) => {
+            println!("another instance is already running");
+            return;
+        }
+        Ok(single_instance::SingleInstance::First) => {}
+        Err(e) => {
+            eprintln!("single-instance check failed: {e}");
+        }
+    }
+
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = app::App::new();

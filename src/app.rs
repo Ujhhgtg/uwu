@@ -1,6 +1,7 @@
 use crate::assets::ICON;
 use crate::passthrough_helper::PassthroughHelper;
 use crate::render::RenderState;
+use crate::single_instance;
 #[cfg(feature = "startup_animation")]
 use crate::state::StartupAnimation;
 use crate::state::{
@@ -443,6 +444,12 @@ impl ApplicationHandler<()> for App {
 
     // redraw if egui requests repaint
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if single_instance::FOCUS_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            let window = self.window.as_ref().unwrap();
+            window.set_minimized(false);
+            window.focus_window();
+        }
+
         if self.state.should_quit {
             return;
         }
