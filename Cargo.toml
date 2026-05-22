@@ -1,98 +1,10 @@
-[package]
-name = "uwu"
-description = "A powerful digital whiteboard built with Rust, winit, egui, and wgpu."
-version = "0.4.2"
-authors = ["Fey Xie <feyxiexzf@gmail.com>"]
-edition = "2024"
-repository = "https://github.com/Ujhhgtg/uwu/"
-license-file = "LICENSE"
-
-[features]
-default = ["system_font"]
-startup_animation = ["rodio"]
-embedded_font = []
-system_font = ["fontdb"]
-profiling = ["dep:profiling", "puffin", "puffin_egui"]
-mimalloc = ["dep:mimalloc"]
-
-[dependencies]
-# ui & render
-egui = { version = "0.34", default-features = false, features = [
-    "serde",
-    "rayon",
-] }
-egui-winit = { version = "0.34", default-features = false }
-winit = { version = "0.30", default-features = false }
-egui-wgpu = { version = "0.34", features = ["winit"] }
-wgpu = { version = "29", default-features = false, features = [
-    "dx12",
-    "metal",
-    "parking_lot",
-    "serde",
-    "std",
-    "vulkan",
-    "wgsl",
-] }
-
-# ui utils
-egui-notify = "*"
-image = { version = "*", default-features = false, features = [
-    "ico",
-    "jpeg",
-    "png",
-    "webp",
-] }
-ttf-parser = "*"
-rfd = "*"
-
-# serialization
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
-rkyv = { version = "0.8", features = ["alloc", "bytecheck"] }
-
-# utils
-pollster = "*"
-dirs = "*"
-
-# features dependencies
-rodio = { version = "*", default-features = false, features = [
-    "wav",
-    "playback",
-], optional = true }
-fontdb = { version = "*", optional = true }
-profiling = { version = "*", optional = true, features = [
-    "profile-with-puffin",
-] }
-puffin = { version = "*", optional = true }
-puffin_egui = { version = "*", optional = true }
-mimalloc = { version = "*", optional = true }
-interprocess = "*"
+[workspace]
+members = ["crates/uwu"]
+resolver = "3"
 
 [patch.crates-io]
 puffin = { git = "https://github.com/EmbarkStudios/puffin" }      # crates.io version uses out-of-date egui
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin" } # crates.io version uses out-of-date egui
-
-[build-dependencies]
-winres = "*"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-glib = { version = "0.22", default-features = false }
-egui-winit = { version = "0.34", default-features = false, features = [
-    "wayland",
-] }
-winit = { version = "0.30", default-features = false, features = ["wayland"] }
-egui-wgpu = { version = "0.34", features = ["wayland"] }
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "*", features = [
-    "Win32_System_Console",
-    "Win32_System_Com",
-    "Win32_Foundation",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-] }
-windows-core = { version = "*", default-features = false }
-winreg = "*"
 
 [profile.release]
 strip = true

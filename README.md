@@ -27,9 +27,9 @@ rustup toolchain install nightly
 rustup default nightly
 
 # --- system deps ---
-sudo apt install libasound2-dev libglib2.0-dev libgtk-3-dev libappindicator3-dev libxdo-dev pkg-config
-# or for arch linux
 yay -S alsa-lib gtk3 libappindicator xdotool pkgconf
+# or for debian-based
+sudo apt install libasound2-dev libglib2.0-dev libgtk-3-dev libappindicator3-dev libxdo-dev pkg-config
 # --- end ---
 ```
 
@@ -37,17 +37,15 @@ yay -S alsa-lib gtk3 libappindicator xdotool pkgconf
 
 ```bash
 cargo build --release
-# or with cjk font embedded
-cargo build --release --no-default-features --features embedded_font
 # or with profiling
-cargo build --release --no-default-features --features embedded_font,profiling
+cargo build --release --no-default-features --features profiling
 ```
 
 ### cross-compiling for windows from linux
 
 #### prepare
 
-good luck figuring this out if you're not using arch (download & install manually from [gh releases](https://github.com/mstorsjo/llvm-mingw/releases))
+good luck figuring this out if you're not using arch (download & install manually from [llvm-mingw releases](https://github.com/mstorsjo/llvm-mingw/releases))
 
 ```bash
 # first add chaotic-aur, then
