@@ -10,16 +10,16 @@ use winit::window::{Window, WindowLevel};
 use crate::{
     assets,
     state::{
-        AppState, CanvasImage, CanvasObject, CanvasObjectOps, CanvasShapeType, CanvasStroke,
-        CanvasText, CanvasTool, DynamicBrushWidthMode, GraphicsApi, HistoryCommand, InsertTab,
-        MarqueeMatchMode, ObjectTransform, OptimizationPolicy, PageState, PersistentState,
-        PointerInteraction, PointerState, StrokeWidth, ThemeMode, WindowMode,
+        AppCommand, AppState, CanvasImage, CanvasObject, CanvasObjectOps, CanvasShapeType,
+        CanvasStroke, CanvasText, CanvasTool, DynamicBrushWidthMode, GraphicsApi, HistoryCommand,
+        InsertTab, MarqueeMatchMode, ObjectTransform, OptimizationPolicy, PageState,
+        PersistentState, PointerInteraction, PointerState, StrokeWidth, ThemeMode, WindowMode,
     },
     utils::{
         self,
         stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start},
         ui::{
-            PageAction, UiExtras, add_new_page_state, apply_theme_mode_and_canvas_color,
+            PageAction, UiExt, add_new_page_state, apply_theme_mode_and_canvas_color,
             apply_window_mode, clear_interaction_state, load_page_from_file, save_page_to_file,
             switch_to_page_state,
         },
@@ -508,7 +508,9 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                     )
                     .changed()
             {
-                state.present_mode_changed = true;
+                state
+                    .command_queue
+                    .push(AppCommand::SetPresentMode(state.persistent.present_mode));
             }
         });
 
@@ -663,7 +665,9 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                         state.persistent.canvas_color,
                     );
                 }
-                state.present_mode_changed = true;
+                state
+                    .command_queue
+                    .push(AppCommand::SetPresentMode(state.persistent.present_mode));
                 apply_window_mode(state, window);
             }
         });
@@ -723,7 +727,7 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
         ui.horizontal(|ui| {
             ui.my_label("悬浮窗模式:");
             if ui.checkbox(&mut state.is_overlay_mode, "").changed() {
-                state.overlay_mode_changed = true;
+                state.command_queue.push(AppCommand::UpdateCursorHittest);
                 if state.is_overlay_mode {
                     window.set_window_level(WindowLevel::AlwaysOnTop);
                     state.current_tool = CanvasTool::Passthrough;
@@ -1412,6 +1416,9 @@ fn ui_toolbar_tools_content(
                 state.pointers.clear();
                 state.clear_selection();
                 state.current_tool = CanvasTool::Brush;
+                if state.is_overlay_mode {
+                    state.command_queue.push(AppCommand::UpdateCursorHittest);
+                }
             }
         });
     } else if state.current_tool == CanvasTool::Insert {
@@ -1476,6 +1483,9 @@ fn ui_toolbar_tools_content(
                             state.canvas.objects.push(CanvasObject::Image(new_image));
 
                             state.current_tool = CanvasTool::Select;
+                            if state.is_overlay_mode {
+                                state.command_queue.push(AppCommand::UpdateCursorHittest);
+                            }
                         }
                         Err(err) => {
                             state.toasts.error(format!("图片插入失败: {}!", err));
@@ -1591,6 +1601,9 @@ fn ui_toolbar_tools_content(
                             .save_add_object(index, CanvasObject::Text(new_text.clone()));
                         state.canvas.objects.push(CanvasObject::Text(new_text));
                         state.current_tool = CanvasTool::Select;
+                        if state.is_overlay_mode {
+                            state.command_queue.push(AppCommand::UpdateCursorHittest);
+                        }
                         state.new_text_content.clear();
                     }
 
@@ -1641,6 +1654,9 @@ fn ui_toolbar_tools_selector(state: &mut AppState, ui: &mut Ui) {
             && state.current_tool != old_tool
         {
             clear_interaction_state(state);
+            if state.is_overlay_mode {
+                state.command_queue.push(AppCommand::UpdateCursorHittest);
+            }
             state.toolbar_expanded = false;
         }
     });
@@ -2652,26 +2668,70 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
 const IMAGE_FILE_EXTS: &[&str; 6] = &["png", "jpg", "jpeg", "bmp", "webp", "ico"];
 
-/// Renders the passthrough helper window UI with a return button.
-/// Returns `true` when the button is clicked, signaling that the helper
-/// should be closed and the tool should switch back to Brush.
-pub fn ui_passthrough_helper(ctx: &Context) -> bool {
-    let mut clicked = false;
-    let id = Id::new((ctx.viewport_id(), "passthrough_helper_panel"));
-    let mut panel_ui = Ui::new(
-        ctx.clone(),
-        id,
-        UiBuilder::new().max_rect(ctx.content_rect()),
-    );
-    panel_ui.set_clip_rect(ctx.content_rect());
-    CentralPanel::default().show_inside(&mut panel_ui, |ui| {
-        let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::click());
-        if ui
-            .put(rect, Button::new(RichText::new("继续绘制").size(14.0)))
-            .clicked()
-        {
-            clicked = true;
-        }
-    });
-    clicked
+/// Renders the passthrough helper window UI with a full toolbar.
+/// Tool selector buttons are functional (switches tool & closes helper).
+/// Returns `true` when a tool is clicked, signaling that the helper should close.
+pub fn ui_passthrough_helper(state: &mut AppState, ctx: &Context) -> bool {
+    let mut close = false;
+    egui::Window::new("##passthrough_helper_window")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .movable(false)
+        .fixed_rect(ctx.content_rect())
+        .show(ctx, |ui| {
+            if state.current_tool == CanvasTool::Passthrough {
+                ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
+            }
+
+            ui.separator();
+
+            // Tool selector - functional (switch tool + close helper)
+            ui.horizontal(|ui| {
+                ui.my_label("工具:");
+                let old_tool = state.current_tool;
+                if ((state.is_overlay_mode
+                    && ui
+                        .selectable_value(&mut state.current_tool, CanvasTool::Passthrough, "穿透")
+                        .changed())
+                    || ui
+                        .selectable_value(&mut state.current_tool, CanvasTool::Select, "选择")
+                        .changed()
+                    || ui
+                        .selectable_value(&mut state.current_tool, CanvasTool::View, "视图")
+                        .changed()
+                    || ui
+                        .selectable_value(&mut state.current_tool, CanvasTool::Brush, "画笔")
+                        .changed()
+                    || ui
+                        .selectable_value(
+                            &mut state.current_tool,
+                            CanvasTool::ObjectEraser,
+                            "对象擦",
+                        )
+                        .changed()
+                    || ui
+                        .selectable_value(
+                            &mut state.current_tool,
+                            CanvasTool::PixelEraser,
+                            "像素擦",
+                        )
+                        .changed()
+                    || ui
+                        .selectable_value(&mut state.current_tool, CanvasTool::Insert, "插入")
+                        .changed()
+                    || ui
+                        .selectable_value(&mut state.current_tool, CanvasTool::Settings, "设置")
+                        .changed())
+                    && state.current_tool != old_tool
+                {
+                    clear_interaction_state(state);
+                    if state.is_overlay_mode {
+                        state.command_queue.push(AppCommand::UpdateCursorHittest);
+                    }
+                    close = true;
+                }
+            });
+        });
+    close
 }

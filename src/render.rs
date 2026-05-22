@@ -71,7 +71,7 @@ impl RenderState {
 
         surface.configure(&device, &surface_config);
 
-        const SCALE_FACTOR: f32 = 1.0;
+        const SCALE_FACTOR: f32 = 1.0; // TODO: modifying this to non-1.0 values breaks most stuff
 
         let egui_renderer = EguiRenderer::new(
             &device,

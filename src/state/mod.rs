@@ -1479,6 +1479,13 @@ pub enum MarqueeMatchMode {
     Containing,
 }
 
+/// Deferred commands that execute at the start of the next redraw frame.
+#[derive(Debug, Clone, Copy)]
+pub enum AppCommand {
+    SetPresentMode(wgpu::PresentMode),
+    UpdateCursorHittest,
+}
+
 // 应用程序状态
 pub struct AppState {
     // canvas states
@@ -1529,9 +1536,8 @@ pub struct AppState {
     pub active_backend: Option<Backend>,
     pub cursor_position: PhysicalPosition<f64>,
 
-    // reactive states
-    pub present_mode_changed: bool,
-    pub overlay_mode_changed: bool,
+    // deferred commands
+    pub command_queue: Vec<AppCommand>,
 
     #[cfg(feature = "startup_animation")]
     pub startup_animation: Option<StartupAnimation>, // 启动动画
@@ -1581,9 +1587,8 @@ impl Default for AppState {
                 .with_margin(egui::vec2(20.0, 20.0)),
             history: History::default(),
             active_backend: None,
-            present_mode_changed: false,
+            command_queue: Vec::with_capacity(3),
             is_overlay_mode: false,
-            overlay_mode_changed: false,
             cursor_position: PhysicalPosition {
                 x: 0.0_f64,
                 y: 0.0_f64,

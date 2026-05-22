@@ -9,8 +9,8 @@ use winit::window::{Fullscreen, Window};
 use crate::{
     assets,
     state::{
-        AppState, CanvasObject, CanvasShape, CanvasShapeType, CanvasStroke, CanvasTool, PageState,
-        StrokeWidth, ThemeMode, WindowMode,
+        AppCommand, AppState, CanvasObject, CanvasShape, CanvasShapeType, CanvasStroke, CanvasTool,
+        PageState, StrokeWidth, ThemeMode, WindowMode,
     },
 };
 
@@ -177,11 +177,11 @@ pub fn setup_fonts(ctx: &mut Context) {
     ctx.set_fonts(fonts);
 }
 
-pub trait UiExtras {
+pub trait UiExt {
     fn my_label(&mut self, text: impl Into<WidgetText>) -> Response;
 }
 
-impl UiExtras for Ui {
+impl UiExt for Ui {
     #[inline(always)]
     fn my_label(&mut self, text: impl Into<WidgetText>) -> Response {
         Label::new(text).selectable(false).ui(self)
@@ -302,5 +302,8 @@ pub fn create_shape_object(
     state.shapes_inserted_count += 1;
     if !state.continuous_insert && state.shapes_inserted_count >= 1 {
         state.current_tool = CanvasTool::Brush;
+        if state.is_overlay_mode {
+            state.command_queue.push(AppCommand::UpdateCursorHittest);
+        }
     }
 }

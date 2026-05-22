@@ -5,7 +5,7 @@ use crate::single_instance;
 #[cfg(feature = "startup_animation")]
 use crate::state::StartupAnimation;
 use crate::state::{
-    AppState, CanvasObject, CanvasObjectOps, CanvasTool, HistoryCommand, InsertTab,
+    AppCommand, AppState, CanvasObject, CanvasObjectOps, CanvasTool, HistoryCommand, InsertTab,
     MarqueeMatchMode, PointerInteraction, PointerState,
 };
 use crate::ui;
@@ -196,10 +196,20 @@ error: failed to enable premultiplied alpha for window: {:?}
         profiling::scope!("handle_redraw::setup");
 
         let render_state = unsafe { self.render_state.as_mut().unwrap_unchecked() };
+        let window = unsafe { self.window.as_ref().unwrap_unchecked() };
 
-        if self.state.present_mode_changed {
-            render_state.set_present_mode(self.state.persistent.present_mode);
-            self.state.present_mode_changed = false;
+        // process deferred commands
+        for cmd in self.state.command_queue.drain(..) {
+            match cmd {
+                AppCommand::SetPresentMode(mode) => {
+                    render_state.set_present_mode(mode);
+                }
+                AppCommand::UpdateCursorHittest => {
+                    let passthrough = self.state.is_overlay_mode
+                        && self.state.current_tool == CanvasTool::Passthrough;
+                    let _ = window.set_cursor_hittest(!passthrough);
+                }
+            }
         }
 
         let screen_descriptor = ScreenDescriptor {
@@ -207,8 +217,7 @@ error: failed to enable premultiplied alpha for window: {:?}
                 render_state.surface_config.width,
                 render_state.surface_config.height,
             ],
-            pixels_per_point: self.window.as_ref().unwrap().scale_factor() as f32
-                * render_state.scale_factor,
+            pixels_per_point: window.scale_factor() as f32 * render_state.scale_factor,
         };
 
         let surface_texture = render_state.surface.get_current_texture();
@@ -232,8 +241,6 @@ error: failed to enable premultiplied alpha for window: {:?}
         let mut encoder = render_state
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        let window = unsafe { self.window.as_ref().unwrap_unchecked() };
 
         render_state.egui_renderer.begin_frame(window);
 
@@ -386,7 +393,7 @@ error: failed to enable premultiplied alpha for window: {:?}
                     self.state.toasts.success("成功导出为图片!");
                 }
                 Err(err) => {
-                    self.state.toasts.error(format!("画布导出失败: {}!", err));
+                    self.state.toasts.error(format!("图片导出失败: {}!", err));
                 }
             }
 
@@ -413,21 +420,6 @@ error: failed to enable premultiplied alpha for window: {:?}
 
         surface_texture.present();
 
-        // update window passthrough state once if disabled
-        if self.state.overlay_mode_changed && !self.state.is_overlay_mode {
-            let _ = window.set_cursor_hittest(true);
-            self.state.overlay_mode_changed = false;
-        }
-
-        // update window passthrough state
-        if self.state.is_overlay_mode {
-            if self.state.current_tool == CanvasTool::Passthrough {
-                let _ = window.set_cursor_hittest(false);
-            } else {
-                let _ = window.set_cursor_hittest(true);
-            }
-        }
-
         if self.state.persistent.show_fps {
             _ = self.state.fps_counter.update();
         }
@@ -447,10 +439,6 @@ impl ApplicationHandler<()> for App {
             let window = self.window.as_ref().unwrap();
             window.set_minimized(false);
             window.focus_window();
-        }
-
-        if self.state.should_quit {
-            return;
         }
 
         self.request_helper_repaint_if_needed();

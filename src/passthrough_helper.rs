@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::app::App;
 use crate::render::EguiRenderer;
+use crate::state::AppCommand;
 use crate::state::CanvasTool;
 use crate::ui;
 use crate::utils::ui::apply_theme_mode_and_canvas_color;
@@ -21,7 +22,7 @@ pub struct PassthroughHelper {
 
 impl App {
     pub fn create_helper_window(&mut self, event_loop: &ActiveEventLoop) {
-        let window_size = LogicalSize::new(180.0, 50.0);
+        let window_size = LogicalSize::new(420.0, 60.0);
 
         let mut attrs = Window::default_attributes()
             .with_title("uwu")
@@ -100,10 +101,12 @@ impl App {
         if let Some(helper) = &self.helper_window {
             helper.window.set_visible(false);
         }
-        self.state.current_tool = CanvasTool::Brush;
-        if let Some(window) = &self.window {
-            window.request_redraw();
+        if self.state.is_overlay_mode {
+            self.state
+                .command_queue
+                .push(AppCommand::UpdateCursorHittest);
         }
+        self.window.as_ref().unwrap().request_redraw();
     }
 
     fn destroy_helper_window(&mut self) {
@@ -119,6 +122,7 @@ impl App {
             WindowEvent::RedrawRequested => {
                 if self.handle_helper_redraw() {
                     self.close_helper_window();
+                    self.window.as_ref().unwrap().request_redraw();
                 }
             }
             WindowEvent::CloseRequested => {
@@ -173,7 +177,7 @@ impl App {
 
         let ctx = helper.egui_renderer.context().clone();
 
-        let clicked_return = ui::ui_passthrough_helper(&ctx);
+        let clicked_return = ui::ui_passthrough_helper(&mut self.state, &ctx);
 
         let mut encoder = render_state
             .device
