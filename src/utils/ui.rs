@@ -85,7 +85,7 @@ pub enum PageAction {
 }
 
 pub fn clear_interaction_state(state: &mut AppState) {
-    state.selected_object_index = None;
+    state.selected_object_indices.clear();
     state.pointers.clear();
     state.shapes_inserted_count = 0;
     state.selected_shape_type = None;

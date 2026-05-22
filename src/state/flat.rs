@@ -292,6 +292,8 @@ fn history_command_to_flat(cmd: &HistoryCommand) -> Option<HistoryCommandFlat> {
             old_transform: ObjectTransformFlat::from(old_transform),
             new_transform: ObjectTransformFlat::from(new_transform),
         }),
+        // FIXME: batch commands are ignored
+        HistoryCommand::BatchCommand { .. } => None,
     }
 }
 

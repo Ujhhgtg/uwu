@@ -467,3 +467,258 @@ impl OutlineBuilder for StrokeBuilder {
         }
     }
 }
+// ===== Polygon geometry utilities for lasso selection =====
+
+/// Determines if a point is inside a polygon using the ray casting algorithm.
+/// Returns `true` if the point is inside or on the boundary.
+#[cfg_attr(feature = "profiling", profiling::function)]
+pub fn point_in_polygon(point: Pos2, polygon: &[Pos2]) -> bool {
+    let n = polygon.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let pi = polygon[i];
+        let pj = polygon[j];
+        if ((pi.y > point.y) != (pj.y > point.y))
+            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Checks whether any polygon edge crosses any rect edge, or if either shape
+/// contains a corner of the other. Used for `MarqueeMatchMode::Overlapping`.
+#[cfg_attr(feature = "profiling", profiling::function)]
+pub fn polygon_intersects_rect(polygon: &[Pos2], rect: Rect) -> bool {
+    if polygon.len() < 3 {
+        return false;
+    }
+
+    // Fast check: any polygon vertex inside the rect?
+    if polygon.iter().any(|p| rect.contains(*p)) {
+        return true;
+    }
+
+    let corners = [
+        Pos2::new(rect.left(), rect.top()),
+        Pos2::new(rect.right(), rect.top()),
+        Pos2::new(rect.right(), rect.bottom()),
+        Pos2::new(rect.left(), rect.bottom()),
+    ];
+
+    // Any rect corner inside the polygon?
+    if corners.iter().any(|c| point_in_polygon(*c, polygon)) {
+        return true;
+    }
+
+    // Check edge intersections between polygon and rectangle
+    let rect_edges = [
+        (corners[0], corners[1]),
+        (corners[1], corners[2]),
+        (corners[2], corners[3]),
+        (corners[3], corners[0]),
+    ];
+
+    let n = polygon.len();
+    for i in 0..n {
+        let a = polygon[i];
+        let b = polygon[(i + 1) % n];
+        for &(c, d) in &rect_edges {
+            if segments_intersect(a, b, c, d) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Checks whether all four corners of `rect` lie inside `polygon`.
+/// Used for `MarqueeMatchMode::Containing`.
+#[cfg_attr(feature = "profiling", profiling::function)]
+pub fn polygon_contains_rect(polygon: &[Pos2], rect: Rect) -> bool {
+    if polygon.len() < 3 {
+        return false;
+    }
+    let corners = [
+        Pos2::new(rect.left(), rect.top()),
+        Pos2::new(rect.right(), rect.top()),
+        Pos2::new(rect.right(), rect.bottom()),
+        Pos2::new(rect.left(), rect.bottom()),
+    ];
+    corners.iter().all(|c| point_in_polygon(*c, polygon))
+}
+
+/// Ear-clipping triangulation for arbitrary simple (concave) polygons.
+/// Returns a vector of triangles, each as `[Pos2; 3]`.
+/// The polygon must be non-self-intersecting (simple).
+#[cfg_attr(feature = "profiling", profiling::function)]
+pub fn triangulate_polygon(polygon: &[Pos2]) -> Vec<[Pos2; 3]> {
+    let n = polygon.len();
+    if n < 3 {
+        return Vec::new();
+    }
+
+    // Index list that we'll clip ears from
+    let mut indices: Vec<usize> = (0..n).collect();
+    let mut triangles: Vec<[Pos2; 3]> = Vec::with_capacity(n.saturating_sub(2));
+
+    // Determine polygon orientation from signed area
+    let mut area: f32 = 0.0;
+    let mut j = n - 1;
+    for i in 0..n {
+        area += (polygon[j].x + polygon[i].x) * (polygon[j].y - polygon[i].y);
+        j = i;
+    }
+    let is_ccw = area > 0.0;
+
+    let mut iterations = 0;
+    // Allow enough iterations for worst-case O(n²)
+    let max_iterations = n * n;
+
+    let mut i = 0usize;
+    while indices.len() > 3 && iterations < max_iterations {
+        iterations += 1;
+        let len = indices.len();
+        let prev = indices[(i + len - 1) % len];
+        let curr = indices[i];
+        let next = indices[(i + 1) % len];
+
+        let a = polygon[prev];
+        let b = polygon[curr];
+        let c = polygon[next];
+
+        // Cross product of edge (prev→curr) and (curr→next)
+        let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+
+        // Ear vertex must be convex (same sign as polygon orientation)
+        let convex = if is_ccw { cross > 0.0 } else { cross < 0.0 };
+        if !convex {
+            i = (i + 1) % len;
+            continue;
+        }
+
+        // Check no other vertex lies inside triangle (a, b, c)
+        let mut is_ear = true;
+        for &vi in &indices {
+            if vi == prev || vi == curr || vi == next {
+                continue;
+            }
+            if point_in_triangle(polygon[vi], a, b, c) {
+                is_ear = false;
+                break;
+            }
+        }
+
+        if is_ear {
+            triangles.push([a, b, c]);
+            indices.remove(i);
+            i = i.saturating_sub(1);
+        } else {
+            i = (i + 1) % len;
+        }
+    }
+
+    // Final triangle
+    if indices.len() == 3 {
+        triangles.push([
+            polygon[indices[0]],
+            polygon[indices[1]],
+            polygon[indices[2]],
+        ]);
+    }
+
+    triangles
+}
+
+/// Ramer-Douglas-Peucker simplification reduces vertex count
+/// while preserving the overall shape.
+/// `epsilon` is the maximum distance (in canvas coordinates) a simplified
+/// edge can deviate from the original polyline.
+#[cfg_attr(feature = "profiling", profiling::function)]
+pub fn simplify_polygon(points: &[Pos2], epsilon: f32) -> Vec<Pos2> {
+    let n = points.len();
+    if n <= 2 {
+        return points.to_vec();
+    }
+
+    // Find the point with the maximum distance from the line segment (start, end)
+    let start = points[0];
+    let end = points[n - 1];
+    let (mut dmax, mut idx) = (0.0f32, 0usize);
+
+    for (i, p) in points.iter().enumerate().skip(1) {
+        let d = perpendicular_distance(*p, start, end);
+        if d > dmax {
+            dmax = d;
+            idx = i;
+        }
+    }
+
+    let mut result = Vec::new();
+    if dmax > epsilon {
+        // Recursively simplify both halves
+        let left = simplify_polygon(&points[..=idx], epsilon);
+        let right = simplify_polygon(&points[idx..], epsilon);
+        // Combine: left + right[1..] (avoid duplicating the split point)
+        result.reserve(left.len() + right.len() - 1);
+        result.extend_from_slice(&left[..left.len() - 1]);
+        result.extend_from_slice(&right);
+    } else {
+        result.push(start);
+        result.push(end);
+    }
+
+    result
+}
+
+// ---- Private helpers ----
+
+/// Cross-product-based orientation: positive = CCW turn, negative = CW, zero = collinear
+fn orientation(a: Pos2, b: Pos2, c: Pos2) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+/// Check if two line segments (a→b) and (c→d) intersect (excluding collinear overlaps)
+fn segments_intersect(a: Pos2, b: Pos2, c: Pos2, d: Pos2) -> bool {
+    let o1 = orientation(a, b, c);
+    let o2 = orientation(a, b, d);
+    let o3 = orientation(c, d, a);
+    let o4 = orientation(c, d, b);
+
+    // General case: endpoints straddle each other's line
+    (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
+}
+
+/// Check if point `p` lies inside triangle (a, b, c) using barycentric coordinates.
+/// Returns `true` for strictly interior points (not on edge).
+fn point_in_triangle(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> bool {
+    let d = orientation(a, b, p);
+    let e = orientation(b, c, p);
+    let f = orientation(c, a, p);
+
+    let has_neg = d < 0.0 || e < 0.0 || f < 0.0;
+    let has_pos = d > 0.0 || e > 0.0 || f > 0.0;
+
+    !(has_neg && has_pos)
+}
+
+/// Perpendicular distance from point `p` to the line through `a` and `b`.
+fn perpendicular_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let length_sq = dx * dx + dy * dy;
+    if length_sq == 0.0 {
+        return p.distance(a);
+    }
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / length_sq;
+    let t = t.clamp(0.0, 1.0);
+    let proj = Pos2::new(a.x + t * dx, a.y + t * dy);
+    p.distance(proj)
+}

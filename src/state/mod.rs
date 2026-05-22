@@ -771,6 +771,8 @@ pub struct PersistentState {
 
     #[serde(default)]
     pub easter_egg_redo: bool,
+    #[serde(default)]
+    pub click_to_single_select: bool,
 }
 
 impl Default for PersistentState {
@@ -785,6 +787,7 @@ impl Default for PersistentState {
             stroke_straightening_tolerance: 20.0,
             interpolation_frequency: 0.1,
             quick_colors: utils::get_default_quick_colors(),
+            click_to_single_select: false,
 
             show_fps: false,
             window_mode: WindowMode::default(),
@@ -1044,7 +1047,7 @@ pub enum PointerInteraction {
     Selecting {
         drag_start: Pos2,
         dragged_handle: Option<TransformHandle>,
-        drag_original_transform: Option<ObjectTransform>,
+        drag_original_transforms: Vec<(usize, ObjectTransform)>,
         drag_accumulated_delta: egui::Vec2,
     },
     Erasing,
@@ -1054,6 +1057,11 @@ pub enum PointerInteraction {
     },
     Panning {
         last_pos: Pos2,
+    },
+    MarqueeSelect {
+        #[allow(dead_code)]
+        drag_start: Pos2,
+        points: Vec<Pos2>,
     },
 }
 
@@ -1217,6 +1225,9 @@ pub enum HistoryCommand {
         old_transform: ObjectTransform,
         new_transform: ObjectTransform,
     },
+    BatchCommand {
+        commands: Vec<HistoryCommand>,
+    },
 }
 
 // 对象变换信息
@@ -1291,8 +1302,13 @@ impl History {
         self.push_command(command);
     }
 
+    // 保存批量操作命令
+    pub fn save_batch(&mut self, commands: Vec<HistoryCommand>) {
+        self.push_command(HistoryCommand::BatchCommand { commands });
+    }
+
     // 推送命令并维护历史记录大小
-    fn push_command(&mut self, command: HistoryCommand) {
+    pub(crate) fn push_command(&mut self, command: HistoryCommand) {
         self.undo_stack.push(command);
         self.redo_stack.clear();
 
@@ -1357,6 +1373,11 @@ impl History {
                     History::apply_transform(&mut current_state.objects[*index], old_transform);
                 }
             }
+            HistoryCommand::BatchCommand { commands } => {
+                for cmd in commands.iter().rev() {
+                    self.apply_reverse(cmd, current_state);
+                }
+            }
         }
     }
 
@@ -1391,6 +1412,11 @@ impl History {
             } => {
                 if *index < current_state.objects.len() {
                     History::apply_transform(&mut current_state.objects[*index], new_transform);
+                }
+            }
+            HistoryCommand::BatchCommand { commands } => {
+                for cmd in commands.iter() {
+                    self.apply_forward(cmd, current_state);
                 }
             }
         }
@@ -1443,6 +1469,16 @@ impl Default for History {
     }
 }
 
+/// Marquee multi-select matching mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarqueeMatchMode {
+    #[default]
+    /// Select objects whose bounding box intersects the marquee rect
+    Overlapping,
+    /// Select objects whose bounding box is fully inside the marquee rect
+    Containing,
+}
+
 // 应用程序状态
 pub struct AppState {
     // canvas states
@@ -1454,7 +1490,7 @@ pub struct AppState {
     pub brush_color: Color32,                 // 画笔颜色
     pub brush_width: f32,                     // 画笔大小
     pub dynamic_brush_width_mode: DynamicBrushWidthMode, // 动态画笔大小微调
-    pub view_offset: egui::Vec2,              // 画布视图偏移 (无限画布)
+    pub view_offset: egui::Vec2,              // 画布视图偏移
     pub view_zoom: f32,                       // 画布视图缩放 (1.0 = 100%)
     pub pinch_state: Option<PinchState>,      // 双指缩放状态
     pub current_tool: CanvasTool,             // 当前工具
@@ -1463,7 +1499,8 @@ pub struct AppState {
     pub continuous_insert: bool,              // 是否连续插入形状
     pub shapes_inserted_count: u32,           // 已插入形状的计数
     pub eraser_size: f32,                     // 橡皮擦大小
-    pub selected_object_index: Option<usize>, // 选中的对象索引（全局共享）
+    pub marquee_match_mode: MarqueeMatchMode, // 多选框匹配模式
+    pub selected_object_indices: Vec<usize>,  // 选中的对象索引
 
     // persistent states
     pub persistent: PersistentState,
@@ -1523,7 +1560,8 @@ impl Default for AppState {
             continuous_insert: false,
             shapes_inserted_count: 0,
             eraser_size: 10.0,
-            selected_object_index: None,
+            marquee_match_mode: MarqueeMatchMode::default(),
+            selected_object_indices: Vec::new(),
             show_size_preview: false,
             fps_counter: FpsCounter::new(),
             should_quit: false,
@@ -1635,5 +1673,21 @@ impl AppState {
         self.view_offset = pinch.initial_view_offset
             + pinch.initial_center_screen.to_vec2() / pinch.initial_zoom
             - c_new.to_vec2() / z_new;
+    }
+
+    pub fn is_selected(&self, index: usize) -> bool {
+        self.selected_object_indices.contains(&index)
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected_object_indices.clear();
+    }
+
+    pub fn toggle_selection(&mut self, index: usize) {
+        if self.is_selected(index) {
+            self.selected_object_indices.retain(|&i| i != index);
+        } else {
+            self.selected_object_indices.push(index);
+        }
     }
 }

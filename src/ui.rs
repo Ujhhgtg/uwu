@@ -11,9 +11,9 @@ use crate::{
     assets,
     state::{
         AppState, CanvasImage, CanvasObject, CanvasObjectOps, CanvasShapeType, CanvasStroke,
-        CanvasText, CanvasTool, DynamicBrushWidthMode, GraphicsApi, InsertTab, OptimizationPolicy,
-        PageState, PersistentState, PointerInteraction, PointerState, StrokeWidth, ThemeMode,
-        WindowMode,
+        CanvasText, CanvasTool, DynamicBrushWidthMode, GraphicsApi, HistoryCommand, InsertTab,
+        MarqueeMatchMode, ObjectTransform, OptimizationPolicy, PageState, PersistentState,
+        PointerInteraction, PointerState, StrokeWidth, ThemeMode, WindowMode,
     },
     utils::{
         self,
@@ -685,7 +685,7 @@ pub fn ui_history(state: &mut AppState, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.my_label("历史记录:");
         if ui.button("撤销").clicked() {
-            state.selected_object_index = None; // prevent selecting phantom object
+            state.clear_selection();
             if state.history.undo(&mut state.canvas) {
                 state.toasts.success("成功撤销操作!");
             } else {
@@ -700,7 +700,7 @@ pub fn ui_history(state: &mut AppState, ui: &mut Ui) {
             })
             .clicked()
         {
-            state.selected_object_index = None; // prevent selecting phantom object
+            state.clear_selection();
             if state.history.redo(&mut state.canvas) {
                 state.toasts.success("成功重做操作!");
             } else {
@@ -1163,73 +1163,133 @@ fn ui_toolbar_tools_content(
             }
         });
     } else if state.current_tool == CanvasTool::Select {
-        if let Some(selected_idx) = state.selected_object_index {
+        ui.horizontal(|ui| {
+            ui.my_label("圈选匹配模式:");
+            ui.selectable_value(
+                &mut state.marquee_match_mode,
+                MarqueeMatchMode::Overlapping,
+                "重叠",
+            );
+            ui.selectable_value(
+                &mut state.marquee_match_mode,
+                MarqueeMatchMode::Containing,
+                "包含",
+            );
+        });
+        ui.checkbox(
+            &mut state.persistent.click_to_single_select,
+            "点击以单选对象",
+        );
+
+        if !state.selected_object_indices.is_empty() {
             ui.horizontal(|ui| {
                 ui.my_label("对象操作:");
                 if ui.button("删除").clicked() {
-                    // Save state to history before modification
-                    let removed_object = state.canvas.objects.remove(selected_idx);
-                    state
-                        .history
-                        .save_remove_object(selected_idx, removed_object);
-                    state.selected_object_index = None;
+                    // Delete all selected, batch history (reverse to keep indices stable)
+                    let mut removed_objects = Vec::new();
+                    let mut indices: Vec<usize> = state.selected_object_indices.clone();
+                    indices.sort_unstable();
+                    for &idx in indices.iter().rev() {
+                        if idx < state.canvas.objects.len() {
+                            let obj = state.canvas.objects.remove(idx);
+                            removed_objects.push((idx, obj));
+                        }
+                    }
+                    state.clear_selection();
+                    let commands: Vec<HistoryCommand> = removed_objects
+                        .into_iter()
+                        .map(|(idx, obj)| HistoryCommand::RemoveObject {
+                            index: idx,
+                            object: obj,
+                        })
+                        .collect();
+                    state.history.save_batch(commands);
                     state.toasts.success("对象已删除!");
                 }
                 if ui.button("复制").clicked() {
-                    let mut clone = state.canvas.objects[selected_idx].clone();
-                    CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
-                    let index = state.canvas.objects.len();
-                    state.history.save_add_object(index, clone.clone());
-                    state.canvas.objects.push(clone);
-                    state.selected_object_index = Some(index);
+                    // Clone all selected, offset each by 20,20
+                    let mut new_indices = Vec::new();
+                    for &idx in &state.selected_object_indices.clone() {
+                        if idx < state.canvas.objects.len() {
+                            let mut clone = state.canvas.objects[idx].clone();
+                            CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
+                            let new_idx = state.canvas.objects.len();
+                            state.history.save_add_object(new_idx, clone.clone());
+                            state.canvas.objects.push(clone);
+                            new_indices.push(new_idx);
+                        }
+                    }
+                    state.selected_object_indices = new_indices;
                     state.toasts.success("对象已复制!");
                 }
-                if ui.button("置顶").clicked() && selected_idx < state.canvas.objects.len() - 1 {
-                    // Save state to history before modification
-                    let object = state.canvas.objects.remove(selected_idx);
-                    // Actually move the object to the top (end of the array)
-                    state.canvas.objects.push(object);
-                    state.history.save_add_object(
-                        state.canvas.objects.len() - 1,
-                        state.canvas.objects.last().unwrap().clone(),
-                    );
-                    state.selected_object_index = Some(state.canvas.objects.len() - 1);
+                if ui.button("置顶").clicked() {
+                    // Move all selected to end, preserving relative order
+                    let mut indices: Vec<usize> = state.selected_object_indices.clone();
+                    indices.sort_unstable();
+                    let mut moved: Vec<CanvasObject> = Vec::new();
+                    for &idx in indices.iter().rev() {
+                        if idx < state.canvas.objects.len() {
+                            moved.push(state.canvas.objects.remove(idx));
+                        }
+                    }
+                    moved.reverse();
+                    let start_idx = state.canvas.objects.len();
+                    let mut commands = Vec::new();
+                    for obj in moved.into_iter() {
+                        let new_idx = state.canvas.objects.len();
+                        state.canvas.objects.push(obj);
+                        commands.push(HistoryCommand::AddObject {
+                            index: new_idx,
+                            object: state.canvas.objects.last().unwrap().clone(),
+                        });
+                    }
+                    state.selected_object_indices =
+                        (start_idx..state.canvas.objects.len()).collect();
+                    state.history.save_batch(commands);
                     state.toasts.success("对象已移至顶部!");
                 }
-                if ui.button("置底").clicked() && selected_idx > 0 {
-                    // Save state to history before modification
-                    let object = state.canvas.objects.remove(selected_idx);
-                    // Actually move the object to the bottom (beginning of the array)
-                    state.canvas.objects.insert(0, object);
-                    state
-                        .history
-                        .save_add_object(0, state.canvas.objects.first().unwrap().clone());
-                    state.selected_object_index = Some(0);
+                if ui.button("置底").clicked() {
+                    // Move all selected to beginning, preserving relative order
+                    let mut indices: Vec<usize> = state.selected_object_indices.clone();
+                    indices.sort_unstable();
+                    let mut moved: Vec<(usize, CanvasObject)> = Vec::new();
+                    for &idx in indices.iter().rev() {
+                        if idx < state.canvas.objects.len() {
+                            moved.push((idx, state.canvas.objects.remove(idx)));
+                        }
+                    }
+                    moved.reverse();
+                    let mut commands = Vec::new();
+                    for (_, obj) in &moved {
+                        state.canvas.objects.insert(0, obj.clone());
+                        commands.push(HistoryCommand::AddObject {
+                            index: 0,
+                            object: obj.clone(),
+                        });
+                    }
+                    state.selected_object_indices = (0..moved.len()).collect();
+                    state.history.save_batch(commands);
                     state.toasts.success("对象已移至底部!");
                 }
-
-                if let Some(CanvasObject::Text(text)) =
-                    state.canvas.objects.get(selected_idx).cloned()
+                if state.selected_object_indices.len() == 1
+                    && let Some(&selected_idx) = state.selected_object_indices.first()
+                    && let Some(CanvasObject::Text(ref text)) =
+                        state.canvas.objects.get(selected_idx).cloned()
                     && ui.button("栅格化").clicked()
                 {
-                    let strokes = utils::rasterize_text(&text, assets::font_bytes());
-
+                    let strokes = utils::rasterize_text(text, assets::font_bytes());
                     state.canvas.objects.remove(selected_idx);
-
                     for stroke in strokes {
                         let stroke_obj = CanvasObject::Stroke(stroke);
                         state.canvas.objects.push(stroke_obj.clone());
-
                         state
                             .history
                             .save_add_object(state.canvas.objects.len() - 1, stroke_obj);
                     }
-
                     state
                         .history
-                        .save_remove_object(selected_idx, CanvasObject::Text(text));
-
-                    state.selected_object_index = None;
+                        .save_remove_object(selected_idx, CanvasObject::Text(text.clone()));
+                    state.clear_selection();
                     state.toasts.success("已转换为笔画!");
                 }
             });
@@ -1356,7 +1416,7 @@ fn ui_toolbar_tools_content(
                 let old_objects = std::mem::take(&mut state.canvas.objects);
                 state.history.save_clear_objects(old_objects);
                 state.pointers.clear();
-                state.selected_object_index = None;
+                state.clear_selection();
                 state.current_tool = CanvasTool::Brush;
             }
         });
@@ -1655,7 +1715,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
         // 绘制所有对象 (带视图裁剪)
         for (i, object) in state.canvas.objects.iter().enumerate() {
-            let selected = state.selected_object_index == Some(i);
+            let selected = state.is_selected(i);
             // 对象包围盒完全在视图外则跳过
             let obj_bbox = object.bounding_box();
             let screen_min = (obj_bbox.min - view_offset) * zoom;
@@ -1793,6 +1853,41 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 _ => unreachable!(),
             };
             utils::draw_size_preview(painter, pos, preview_size);
+        }
+        // 绘制多选框 (marquee)
+        for pointer in state.pointers.values() {
+            if let PointerInteraction::MarqueeSelect { points, .. } = &pointer.interaction {
+                if points.len() < 2 {
+                    continue;
+                }
+                // Convert canvas-coord points to screen coords
+                let screen_pts: Vec<Pos2> =
+                    points.iter().map(|p| (*p - view_offset) * zoom).collect();
+
+                // Draw filled polygon via triangulation
+                if screen_pts.len() >= 3 {
+                    let triangles = utils::triangulate_polygon(&screen_pts);
+                    for tri in &triangles {
+                        painter.add(egui::Shape::convex_polygon(
+                            tri.to_vec(),
+                            Color32::from_black_alpha(30),
+                            Stroke::NONE,
+                        ));
+                    }
+                }
+
+                // Draw polygon outline
+                if screen_pts.len() >= 2 {
+                    let mut shape_points = screen_pts.clone();
+                    if screen_pts.len() >= 3 {
+                        shape_points.push(screen_pts[0]); // close the polygon
+                    }
+                    painter.add(egui::Shape::line(
+                        shape_points,
+                        Stroke::new(1.5 * zoom, Color32::WHITE),
+                    ));
+                }
+            }
         }
 
         // 绘制触控点
@@ -1955,125 +2050,285 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
             CanvasTool::Select => {
                 if !has_touch {
-                    // Handle click: iterate through objects from last to first, check bounding boxes
+                    // Handle click: support shift for toggle, single select without shift
                     if response.clicked()
                         && let Some(click_pos) = canvas_pos
                     {
-                        let mut found_selection = false;
-                        for (i, object) in state.canvas.objects.iter().enumerate().rev() {
-                            if object.bounding_box().contains(click_pos) {
-                                state.selected_object_index = Some(i);
-                                found_selection = true;
-                                break;
-                            }
+                        let shift = ui.ctx().input(|i| i.modifiers.shift);
+                        if !shift {
+                            state.clear_selection();
                         }
-                        if !found_selection {
-                            state.selected_object_index = None;
+
+                        if state.persistent.click_to_single_select {
+                            for (i, object) in state.canvas.objects.iter().enumerate().rev() {
+                                if object.bounding_box().contains(click_pos) {
+                                    if shift {
+                                        state.toggle_selection(i);
+                                    } else {
+                                        state.selected_object_indices.push(i);
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
 
-                    // Handle drag start: create mouse pointer with Selecting interaction
+                    // Handle drag start: Selecting on object or MarqueeSelect on empty space
                     if response.drag_started()
                         && let Some(pos) = canvas_pos
                     {
-                        let (dragged_handle, drag_original_transform) = if let Some(selected_idx) =
-                            state.selected_object_index
-                            && selected_idx < state.canvas.objects.len()
-                        {
-                            let object = &state.canvas.objects[selected_idx];
-                            let bbox = object.bounding_box();
-                            let handle = utils::get_transform_handle_at_pos(bbox, pos);
-                            let transform = handle.is_some().then(|| object.get_transform());
-                            (handle, transform)
+                        // Hit-test: find object under cursor (last-to-first) if click-to-select enabled
+                        let hit_idx = if state.persistent.click_to_single_select {
+                            state
+                                .canvas
+                                .objects
+                                .iter()
+                                .enumerate()
+                                .rev()
+                                .find(|(_, obj)| obj.bounding_box().contains(pos))
+                                .map(|(i, _)| i)
                         } else {
-                            (None, None)
+                            None
                         };
 
-                        state.pointers.insert(
-                            0,
-                            PointerState {
-                                id: 0,
-                                pos,
-                                prev_pos: None,
-                                interaction: PointerInteraction::Selecting {
-                                    drag_start: pos,
-                                    dragged_handle,
-                                    drag_original_transform,
-                                    drag_accumulated_delta: egui::Vec2::ZERO,
+                        if let Some(hit) = hit_idx {
+                            // Dragging on an object → entering selecting/move/resize interaction
+                            if !state.is_selected(hit) {
+                                // Dragging on an unselected object: toggle in, or single-select
+                                let shift = ui.ctx().input(|i| i.modifiers.shift);
+                                if shift {
+                                    state.toggle_selection(hit);
+                                } else {
+                                    state.clear_selection();
+                                    state.selected_object_indices.push(hit);
+                                }
+                            }
+                            let (dragged_handle, drag_original_transforms) =
+                                if let Some(&primary_idx) = state.selected_object_indices.first()
+                                    && primary_idx < state.canvas.objects.len()
+                                {
+                                    let object = &state.canvas.objects[primary_idx];
+                                    let bbox = object.bounding_box();
+                                    let handle = if state.selected_object_indices.len() == 1 {
+                                        utils::get_transform_handle_at_pos(bbox, pos)
+                                    } else {
+                                        None
+                                    };
+                                    let transforms: Vec<(usize, ObjectTransform)> = state
+                                        .selected_object_indices
+                                        .iter()
+                                        .filter_map(|&i| {
+                                            if i < state.canvas.objects.len() {
+                                                Some((i, state.canvas.objects[i].get_transform()))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    (handle, transforms)
+                                } else {
+                                    (None, Vec::new())
+                                };
+                            state.pointers.insert(
+                                0,
+                                PointerState {
+                                    id: 0,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::Selecting {
+                                        drag_start: pos,
+                                        dragged_handle,
+                                        drag_original_transforms,
+                                        drag_accumulated_delta: egui::Vec2::ZERO,
+                                    },
                                 },
-                            },
-                        );
+                            );
+                        } else {
+                            // Dragging on empty space → marquee select
+                            state.pointers.insert(
+                                0,
+                                PointerState {
+                                    id: 0,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::MarqueeSelect {
+                                        drag_start: pos,
+                                        points: vec![pos],
+                                    },
+                                },
+                            );
+                        }
                     }
 
-                    // Handle dragging: move or resize the selected object
+                    // Handle dragging: move/resize selected objects or marquee
                     if response.dragged()
-                        && state.selected_object_index.is_some()
                         && let Some(current_pos) = canvas_pos
                         && let Some(pointer) = state.pointers.get_mut(&0)
                     {
                         pointer.pos = current_pos;
-                        if let PointerInteraction::Selecting {
-                            ref mut drag_start,
-                            dragged_handle,
-                            ref mut drag_accumulated_delta,
-                            ..
-                        } = pointer.interaction
-                        {
-                            let delta = current_pos - *drag_start;
+                        match &mut pointer.interaction {
+                            PointerInteraction::Selecting {
+                                drag_start,
+                                dragged_handle,
+                                drag_accumulated_delta,
+                                ..
+                            } => {
+                                let delta = current_pos - *drag_start;
 
-                            if let Some(selected_idx) = state.selected_object_index
-                                && selected_idx < state.canvas.objects.len()
-                            {
                                 if let Some(handle) = dragged_handle {
-                                    if let Some(object) = state.canvas.objects.get_mut(selected_idx)
+                                    // Resize only on the primary (first) selected object
+                                    if let Some(&primary_idx) =
+                                        state.selected_object_indices.first()
+                                        && primary_idx < state.canvas.objects.len()
+                                        && let Some(object) =
+                                            state.canvas.objects.get_mut(primary_idx)
                                     {
-                                        object.transform(handle, delta, *drag_start, current_pos);
+                                        object.transform(*handle, delta, *drag_start, current_pos);
                                     }
                                 } else {
-                                    if let Some(object) = state.canvas.objects.get_mut(selected_idx)
-                                    {
-                                        CanvasObject::move_object(object, delta);
+                                    // Move all selected objects by delta
+                                    for &idx in &state.selected_object_indices.clone() {
+                                        if idx < state.canvas.objects.len()
+                                            && let Some(object) = state.canvas.objects.get_mut(idx)
+                                        {
+                                            CanvasObject::move_object(object, delta);
+                                        }
                                     }
                                     *drag_accumulated_delta += delta;
                                 }
-                            }
 
-                            *drag_start = current_pos;
+                                *drag_start = current_pos;
+                            }
+                            PointerInteraction::MarqueeSelect { points, .. } => {
+                                // Collect points for lasso polygon
+                                let min_dist = 2.0; // minimum distance in canvas coords
+                                if points
+                                    .last()
+                                    .is_none_or(|last| last.distance(current_pos) >= min_dist)
+                                {
+                                    points.push(current_pos);
+                                }
+                            }
+                            _ => {}
                         }
                     }
 
-                    // Handle drag stop: save move/resize to history and clear state
-                    if response.drag_stopped() {
-                        if let Some(pointer) = state.pointers.get(&0)
-                            && let PointerInteraction::Selecting {
+                    // Handle drag stop: save move/resize to history, or select with marquee
+                    if response.drag_stopped()
+                        && let Some(pointer) = state.pointers.remove(&0)
+                    {
+                        match pointer.interaction {
+                            PointerInteraction::Selecting {
                                 drag_accumulated_delta,
-                                drag_original_transform,
+                                drag_original_transforms,
+                                dragged_handle,
                                 ..
-                            } = &pointer.interaction
-                        {
-                            if let Some(selected_idx) = state.selected_object_index
-                                && *drag_accumulated_delta != egui::Vec2::ZERO
-                            {
-                                state.history.save_move_object(
-                                    selected_idx,
-                                    -*drag_accumulated_delta,
-                                    *drag_accumulated_delta,
-                                );
+                            } => {
+                                if dragged_handle.is_some() {
+                                    // Resize: save TransformObject for single object
+                                    if let Some(&(sel_idx, _)) = drag_original_transforms.first()
+                                        && sel_idx < state.canvas.objects.len()
+                                        && let Some(object) = state.canvas.objects.get(sel_idx)
+                                    {
+                                        let new_transform = object.get_transform();
+                                        let old_transform = drag_original_transforms[0].1.clone();
+                                        state.history.save_transform_object(
+                                            sel_idx,
+                                            old_transform,
+                                            new_transform,
+                                        );
+                                    }
+                                } else if drag_accumulated_delta != egui::Vec2::ZERO {
+                                    // Move: save MoveObject(s) for all selected objects
+                                    let commands: Vec<HistoryCommand> = drag_original_transforms
+                                        .iter()
+                                        .map(|&(idx, _)| HistoryCommand::MoveObject {
+                                            index: idx,
+                                            old_position: -drag_accumulated_delta,
+                                            new_position: drag_accumulated_delta,
+                                        })
+                                        .collect();
+                                    if commands.len() <= 1 {
+                                        if let Some(cmd) = commands.into_iter().next() {
+                                            state.history.push_command(cmd);
+                                        }
+                                    } else {
+                                        state.history.save_batch(commands);
+                                    }
+                                }
                             }
-                            if let Some(original) = drag_original_transform.clone()
-                                && let Some(selected_idx) = state.selected_object_index
-                                && selected_idx < state.canvas.objects.len()
-                            {
-                                let new_transform =
-                                    state.canvas.objects[selected_idx].get_transform();
-                                state.history.save_transform_object(
-                                    selected_idx,
-                                    original,
-                                    new_transform,
-                                );
+                            PointerInteraction::MarqueeSelect {
+                                drag_start: _,
+                                mut points,
+                            } => {
+                                // Close the polygon (auto-connect start to end)
+                                if points.len() >= 2
+                                    && points.first().unwrap().distance(*points.last().unwrap())
+                                        > 0.5
+                                {
+                                    points.push(*points.first().unwrap());
+                                }
+
+                                let shift = ui.ctx().input(|i| i.modifiers.shift);
+                                if !shift {
+                                    state.clear_selection();
+                                }
+
+                                if points.len() >= 3 {
+                                    // Simplify polygon for hit-testing performance
+                                    let simplified = utils::simplify_polygon(&points, 4.0);
+
+                                    // Collect matching objects based on mode
+                                    let mode = state.marquee_match_mode;
+                                    let intersecting: Vec<usize> = state
+                                        .canvas
+                                        .objects
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(_, obj)| {
+                                            if let CanvasObject::Stroke(s) = obj {
+                                                match mode {
+                                                    MarqueeMatchMode::Overlapping => {
+                                                        s.points.iter().any(|p| {
+                                                            utils::point_in_polygon(*p, &simplified)
+                                                        })
+                                                    }
+                                                    MarqueeMatchMode::Containing => {
+                                                        s.points.iter().all(|p| {
+                                                            utils::point_in_polygon(*p, &simplified)
+                                                        })
+                                                    }
+                                                }
+                                            } else {
+                                                match mode {
+                                                    MarqueeMatchMode::Overlapping => {
+                                                        utils::polygon_intersects_rect(
+                                                            &simplified,
+                                                            obj.bounding_box(),
+                                                        )
+                                                    }
+                                                    MarqueeMatchMode::Containing => {
+                                                        utils::polygon_contains_rect(
+                                                            &simplified,
+                                                            obj.bounding_box(),
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        })
+                                        .map(|(i, _)| i)
+                                        .collect();
+                                    for i in intersecting {
+                                        if shift {
+                                            state.toggle_selection(i);
+                                        } else {
+                                            state.selected_object_indices.push(i);
+                                        }
+                                    }
+                                }
                             }
+                            _ => {}
                         }
-                        state.pointers.remove(&0);
                     }
                 }
             }

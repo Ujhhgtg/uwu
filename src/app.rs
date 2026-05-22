@@ -5,8 +5,8 @@ use crate::single_instance;
 #[cfg(feature = "startup_animation")]
 use crate::state::StartupAnimation;
 use crate::state::{
-    AppState, CanvasObject, CanvasObjectOps, CanvasTool, InsertTab, PointerInteraction,
-    PointerState,
+    AppState, CanvasObject, CanvasObjectOps, CanvasTool, HistoryCommand, InsertTab,
+    MarqueeMatchMode, PointerInteraction, PointerState,
 };
 use crate::ui;
 use crate::utils;
@@ -558,44 +558,65 @@ impl ApplicationHandler<()> for App {
                         }
                         CanvasTool::Select
                             if !self.state.pointers.values().any(|p| {
-                                matches!(p.interaction, PointerInteraction::Selecting { .. })
+                                matches!(
+                                    p.interaction,
+                                    PointerInteraction::Selecting { .. }
+                                        | PointerInteraction::MarqueeSelect { .. }
+                                )
                             }) =>
                         {
-                            // Hit-test objects (last to first for z-order)
-                            for (i, object) in self.state.canvas.objects.iter().enumerate().rev() {
-                                if object.bounding_box().contains(pos) {
-                                    self.state.selected_object_index = Some(i);
-                                    break;
-                                }
-                            }
-
-                            let (dragged_handle, drag_original_transform) = if let Some(idx) =
-                                self.state.selected_object_index
-                                && idx < self.state.canvas.objects.len()
-                            {
-                                let object = &self.state.canvas.objects[idx];
-                                let bbox = object.bounding_box();
-                                let handle = utils::get_transform_handle_at_pos(bbox, pos);
-                                let transform = handle.is_some().then(|| object.get_transform());
-                                (handle, transform)
+                            // Hit-test objects (last to first for z-order) if click-to-select enabled
+                            let hit_idx = if self.state.persistent.click_to_single_select {
+                                self.state
+                                    .canvas
+                                    .objects
+                                    .iter()
+                                    .enumerate()
+                                    .rev()
+                                    .find(|(_, obj)| obj.bounding_box().contains(pos))
+                                    .map(|(i, _)| i)
                             } else {
-                                (None, None)
+                                None
                             };
 
-                            self.state.pointers.insert(
-                                id,
-                                PointerState {
+                            if let Some(hit) = hit_idx {
+                                // Touch on object: single select and prepare for drag
+                                self.state.clear_selection();
+                                self.state.selected_object_indices.push(hit);
+                                let object = &self.state.canvas.objects[hit];
+                                let bbox = object.bounding_box();
+                                let handle = utils::get_transform_handle_at_pos(bbox, pos);
+                                let transforms = vec![(hit, object.get_transform())];
+                                self.state.pointers.insert(
                                     id,
-                                    pos,
-                                    prev_pos: None,
-                                    interaction: PointerInteraction::Selecting {
-                                        drag_start: pos,
-                                        dragged_handle,
-                                        drag_original_transform,
-                                        drag_accumulated_delta: Vec2::ZERO,
+                                    PointerState {
+                                        id,
+                                        pos,
+                                        prev_pos: None,
+                                        interaction: PointerInteraction::Selecting {
+                                            drag_start: pos,
+                                            dragged_handle: handle,
+                                            drag_original_transforms: transforms,
+                                            drag_accumulated_delta: Vec2::ZERO,
+                                        },
                                     },
-                                },
-                            );
+                                );
+                            } else {
+                                // Touch on empty space: marquee select
+                                self.state.clear_selection();
+                                self.state.pointers.insert(
+                                    id,
+                                    PointerState {
+                                        id,
+                                        pos,
+                                        prev_pos: None,
+                                        interaction: PointerInteraction::MarqueeSelect {
+                                            drag_start: pos,
+                                            points: vec![pos],
+                                        },
+                                    },
+                                );
+                            }
                         }
                         CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
                             self.state.pointers.insert(
@@ -665,26 +686,45 @@ impl ApplicationHandler<()> for App {
                                 {
                                     let delta = pos - *drag_start;
 
-                                    if let Some(idx) = self.state.selected_object_index
-                                        && idx < self.state.canvas.objects.len()
-                                    {
+                                    if !self.state.selected_object_indices.is_empty() {
                                         if let Some(handle) = dragged_handle {
-                                            if let Some(object) =
-                                                self.state.canvas.objects.get_mut(idx)
+                                            if let Some(&primary_idx) =
+                                                self.state.selected_object_indices.first()
+                                                && primary_idx < self.state.canvas.objects.len()
+                                                && let Some(object) =
+                                                    self.state.canvas.objects.get_mut(primary_idx)
                                             {
                                                 object.transform(handle, delta, *drag_start, pos);
                                             }
                                         } else {
-                                            if let Some(object) =
-                                                self.state.canvas.objects.get_mut(idx)
+                                            // Move all selected objects by delta
+                                            for &idx in &self.state.selected_object_indices.clone()
                                             {
-                                                CanvasObject::move_object(object, delta);
+                                                if idx < self.state.canvas.objects.len()
+                                                    && let Some(object) =
+                                                        self.state.canvas.objects.get_mut(idx)
+                                                {
+                                                    CanvasObject::move_object(object, delta);
+                                                }
                                             }
                                             *drag_accumulated_delta += delta;
                                         }
                                     }
 
                                     *drag_start = pos;
+                                }
+
+                                if let PointerInteraction::MarqueeSelect {
+                                    ref mut points, ..
+                                } = pointer.interaction
+                                {
+                                    let min_dist = 2.0;
+                                    if points
+                                        .last()
+                                        .is_none_or(|last| last.distance(pos) >= min_dist)
+                                    {
+                                        points.push(pos);
+                                    }
                                 }
                             }
                         }
@@ -719,36 +759,127 @@ impl ApplicationHandler<()> for App {
                             brush_stroke_end(&mut self.state, id);
                         }
                         CanvasTool::Select => {
-                            if let Some(pointer) = self.state.pointers.get(&id)
-                                && let PointerInteraction::Selecting {
-                                    drag_accumulated_delta,
-                                    drag_original_transform,
-                                    ..
-                                } = &pointer.interaction
-                            {
-                                if let Some(sel_idx) = self.state.selected_object_index
-                                    && *drag_accumulated_delta != Vec2::ZERO
-                                {
-                                    self.state.history.save_move_object(
-                                        sel_idx,
-                                        -*drag_accumulated_delta,
-                                        *drag_accumulated_delta,
-                                    );
-                                }
-                                if let Some(original) = drag_original_transform.clone()
-                                    && let Some(sel_idx) = self.state.selected_object_index
-                                    && sel_idx < self.state.canvas.objects.len()
-                                {
-                                    let new_transform =
-                                        self.state.canvas.objects[sel_idx].get_transform();
-                                    self.state.history.save_transform_object(
-                                        sel_idx,
-                                        original,
-                                        new_transform,
-                                    );
+                            if let Some(pointer) = self.state.pointers.remove(&id) {
+                                match pointer.interaction {
+                                    PointerInteraction::Selecting {
+                                        drag_accumulated_delta,
+                                        drag_original_transforms,
+                                        dragged_handle,
+                                        ..
+                                    } => {
+                                        if dragged_handle.is_some() {
+                                            // Resize: save TransformObject for single object
+                                            if let Some(&(sel_idx, _)) =
+                                                drag_original_transforms.first()
+                                                && sel_idx < self.state.canvas.objects.len()
+                                                && let Some(object) =
+                                                    self.state.canvas.objects.get(sel_idx)
+                                            {
+                                                let new_transform = object.get_transform();
+                                                let old_transform =
+                                                    drag_original_transforms[0].1.clone();
+                                                self.state.history.save_transform_object(
+                                                    sel_idx,
+                                                    old_transform,
+                                                    new_transform,
+                                                );
+                                            }
+                                        } else if drag_accumulated_delta != Vec2::ZERO {
+                                            // Move: save MoveObject(s) for all selected objects
+                                            let commands: Vec<HistoryCommand> =
+                                                drag_original_transforms
+                                                    .iter()
+                                                    .map(|&(idx, _)| HistoryCommand::MoveObject {
+                                                        index: idx,
+                                                        old_position: -drag_accumulated_delta,
+                                                        new_position: drag_accumulated_delta,
+                                                    })
+                                                    .collect();
+                                            if commands.len() <= 1 {
+                                                if let Some(cmd) = commands.into_iter().next() {
+                                                    self.state.history.push_command(cmd);
+                                                }
+                                            } else {
+                                                self.state.history.save_batch(commands);
+                                            }
+                                        }
+                                    }
+                                    PointerInteraction::MarqueeSelect {
+                                        drag_start: _,
+                                        mut points,
+                                    } => {
+                                        // Close the polygon (auto-connect start to end)
+                                        if points.len() >= 2
+                                            && points
+                                                .first()
+                                                .unwrap()
+                                                .distance(*points.last().unwrap())
+                                                > 0.5
+                                        {
+                                            points.push(*points.first().unwrap());
+                                        }
+
+                                        self.state.clear_selection();
+
+                                        if points.len() >= 3 {
+                                            // Simplify polygon for hit-testing performance
+                                            let simplified = utils::simplify_polygon(&points, 4.0);
+
+                                            // Collect matching objects based on mode
+                                            let mode = self.state.marquee_match_mode;
+                                            let intersecting: Vec<usize> = self
+                                                .state
+                                                .canvas
+                                                .objects
+                                                .iter()
+                                                .enumerate()
+                                                .filter(|(_, obj)| {
+                                                    if let CanvasObject::Stroke(s) = obj {
+                                                        match mode {
+                                                            MarqueeMatchMode::Overlapping => {
+                                                                s.points.iter().any(|p| {
+                                                                    utils::point_in_polygon(
+                                                                        *p,
+                                                                        &simplified,
+                                                                    )
+                                                                })
+                                                            }
+                                                            MarqueeMatchMode::Containing => {
+                                                                s.points.iter().all(|p| {
+                                                                    utils::point_in_polygon(
+                                                                        *p,
+                                                                        &simplified,
+                                                                    )
+                                                                })
+                                                            }
+                                                        }
+                                                    } else {
+                                                        match mode {
+                                                            MarqueeMatchMode::Overlapping => {
+                                                                utils::polygon_intersects_rect(
+                                                                    &simplified,
+                                                                    obj.bounding_box(),
+                                                                )
+                                                            }
+                                                            MarqueeMatchMode::Containing => {
+                                                                utils::polygon_contains_rect(
+                                                                    &simplified,
+                                                                    obj.bounding_box(),
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                })
+                                                .map(|(i, _)| i)
+                                                .collect();
+                                            for i in intersecting {
+                                                self.state.selected_object_indices.push(i);
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
-                            self.state.pointers.remove(&id);
                         }
                         CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
                             self.state.pointers.remove(&id);
