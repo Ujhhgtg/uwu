@@ -23,11 +23,11 @@ impl Plugin for ExamplePlugin {
     }
 
     fn init(&mut self) {
-        println!("[example plugin] plugin loaded!")
+        println!("[example plugin] plugin loaded!");
     }
 
     fn uninit(&mut self) {
-        println!("[example plugin] plugin unloaded!")
+        println!("[example plugin] plugin unloaded!");
     }
 
     fn ui(&mut self, ctx: &egui::Context) {

@@ -43,11 +43,11 @@ impl Plugin for StartupAnimationPlugin {
     }
 
     fn init(&mut self) {
-        println!("[startup animation plugin] plugin loaded!")
+        println!("[startup animation plugin] plugin loaded!");
     }
 
     fn uninit(&mut self) {
-        println!("[startup animation plugin] plugin unloaded!")
+        println!("[startup animation plugin] plugin unloaded!");
     }
 
     fn ui(&mut self, ctx: &egui::Context) {
