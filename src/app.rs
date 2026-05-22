@@ -195,7 +195,7 @@ error: failed to enable premultiplied alpha for window: {:?}
         #[cfg(feature = "profiling")]
         profiling::scope!("handle_redraw::setup");
 
-        let render_state = self.render_state.as_mut().unwrap();
+        let render_state = unsafe { self.render_state.as_mut().unwrap_unchecked() };
 
         if self.state.present_mode_changed {
             render_state.set_present_mode(self.state.persistent.present_mode);
@@ -233,7 +233,7 @@ error: failed to enable premultiplied alpha for window: {:?}
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        let window = self.window.as_ref().unwrap();
+        let window = unsafe { self.window.as_ref().unwrap_unchecked() };
 
         render_state.egui_renderer.begin_frame(window);
 
@@ -419,7 +419,7 @@ error: failed to enable premultiplied alpha for window: {:?}
             self.state.overlay_mode_changed = false;
         }
 
-        // update window passthrough state every frame if enabled
+        // update window passthrough state
         if self.state.is_overlay_mode {
             if self.state.current_tool == CanvasTool::Passthrough {
                 let _ = window.set_cursor_hittest(false);
@@ -442,7 +442,6 @@ impl ApplicationHandler<()> for App {
         pollster::block_on(self.create_window(event_loop));
     }
 
-    // redraw if egui requests repaint
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if single_instance::FOCUS_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
             let window = self.window.as_ref().unwrap();
@@ -456,9 +455,15 @@ impl ApplicationHandler<()> for App {
 
         self.request_helper_repaint_if_needed();
 
-        if let Some(render_state) = self.render_state.as_ref()
-            && render_state.egui_renderer.context().has_requested_repaint()
-        {
+        // redraw if egui requests repaint
+        if unsafe {
+            self.render_state
+                .as_ref()
+                .unwrap_unchecked()
+                .egui_renderer
+                .context()
+                .has_requested_repaint()
+        } {
             self.window.as_ref().unwrap().request_redraw();
         }
     }
@@ -565,24 +570,26 @@ impl ApplicationHandler<()> for App {
                                 )
                             }) =>
                         {
-                            // Hit-test objects (last to first for z-order) if click-to-select enabled
-                            let hit_idx = if self.state.persistent.click_to_single_select {
-                                self.state
-                                    .canvas
-                                    .objects
-                                    .iter()
-                                    .enumerate()
-                                    .rev()
-                                    .find(|(_, obj)| obj.bounding_box().contains(pos))
-                                    .map(|(i, _)| i)
-                            } else {
-                                None
-                            };
+                            // Hit-test objects (last to first for z-order) to detect drag target
+                            let hit_idx = self
+                                .state
+                                .canvas
+                                .objects
+                                .iter()
+                                .enumerate()
+                                .rev()
+                                .find(|(_, obj)| obj.bounding_box().contains(pos))
+                                .map(|(i, _)| i);
 
-                            if let Some(hit) = hit_idx {
+                            if let Some(hit) = hit_idx
+                                && (self.state.persistent.click_or_drag_to_single_select
+                                    || self.state.is_selected(hit))
+                            {
                                 // Touch on object: single select and prepare for drag
-                                self.state.clear_selection();
-                                self.state.selected_object_indices.push(hit);
+                                if !self.state.is_selected(hit) {
+                                    self.state.clear_selection();
+                                    self.state.selected_object_indices.push(hit);
+                                }
                                 let object = &self.state.canvas.objects[hit];
                                 let bbox = object.bounding_box();
                                 let handle = utils::get_transform_handle_at_pos(bbox, pos);

@@ -772,7 +772,7 @@ pub struct PersistentState {
     #[serde(default)]
     pub easter_egg_redo: bool,
     #[serde(default)]
-    pub click_to_single_select: bool,
+    pub click_or_drag_to_single_select: bool,
 }
 
 impl Default for PersistentState {
@@ -787,7 +787,7 @@ impl Default for PersistentState {
             stroke_straightening_tolerance: 20.0,
             interpolation_frequency: 0.1,
             quick_colors: utils::get_default_quick_colors(),
-            click_to_single_select: false,
+            click_or_drag_to_single_select: false,
 
             show_fps: false,
             window_mode: WindowMode::default(),

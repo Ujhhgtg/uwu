@@ -1127,21 +1127,15 @@ fn ui_toolbar_tools_content(
         ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
     } else if state.current_tool == CanvasTool::View {
         ui.my_label(egui::RichText::new("(在画布上滑动以移动视图, 滚轮或双指缩放)").italics());
-        ui.my_label("视图操作:");
         ui.horizontal(|ui| {
-            ui.my_label("全部:");
-            if ui.button("重置").clicked() {
+            if ui.button("全部重置").clicked() {
                 state.view_offset = Default::default();
                 state.view_zoom = 1.0;
             }
-        });
-        ui.horizontal(|ui| {
             ui.my_label("移动:");
             if ui.button("重置").clicked() {
                 state.view_offset = Default::default();
             }
-        });
-        ui.horizontal(|ui| {
             ui.my_label("缩放:");
             let mut zoom = state.view_zoom;
             let slider = ui.add(
@@ -1177,8 +1171,8 @@ fn ui_toolbar_tools_content(
             );
         });
         ui.checkbox(
-            &mut state.persistent.click_to_single_select,
-            "点击以单选对象",
+            &mut state.persistent.click_or_drag_to_single_select,
+            "未选中对象时允许点击或拖动以单选对象",
         );
 
         if !state.selected_object_indices.is_empty() {
@@ -2059,7 +2053,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             state.clear_selection();
                         }
 
-                        if state.persistent.click_to_single_select {
+                        if state.persistent.click_or_drag_to_single_select {
                             for (i, object) in state.canvas.objects.iter().enumerate().rev() {
                                 if object.bounding_box().contains(click_pos) {
                                     if shift {
@@ -2077,21 +2071,20 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     if response.drag_started()
                         && let Some(pos) = canvas_pos
                     {
-                        // Hit-test: find object under cursor (last-to-first) if click-to-select enabled
-                        let hit_idx = if state.persistent.click_to_single_select {
-                            state
-                                .canvas
-                                .objects
-                                .iter()
-                                .enumerate()
-                                .rev()
-                                .find(|(_, obj)| obj.bounding_box().contains(pos))
-                                .map(|(i, _)| i)
-                        } else {
-                            None
-                        };
+                        // Hit-test: find object under cursor (last-to-first) for dragging
+                        let hit_idx = state
+                            .canvas
+                            .objects
+                            .iter()
+                            .enumerate()
+                            .rev()
+                            .find(|(_, obj)| obj.bounding_box().contains(pos))
+                            .map(|(i, _)| i);
 
-                        if let Some(hit) = hit_idx {
+                        if let Some(hit) = hit_idx
+                            && (state.persistent.click_or_drag_to_single_select
+                                || state.is_selected(hit))
+                        {
                             // Dragging on an object → entering selecting/move/resize interaction
                             if !state.is_selected(hit) {
                                 // Dragging on an unselected object: toggle in, or single-select
