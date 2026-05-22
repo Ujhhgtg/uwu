@@ -2,11 +2,11 @@ mod app;
 mod assets;
 mod passthrough_helper;
 mod render;
-mod single_instance;
 mod state;
 mod ui;
 mod utils;
 
+use crate::utils::single_instance;
 use std::backtrace::Backtrace;
 
 use winit::event_loop::{ControlFlow, EventLoop};

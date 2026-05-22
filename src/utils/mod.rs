@@ -1,4 +1,5 @@
 pub mod dark_mode;
+pub mod single_instance;
 pub mod stroke;
 pub mod ui;
 
