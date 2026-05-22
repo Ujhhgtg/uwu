@@ -24,6 +24,7 @@ use rodio::Player;
 use std::io::Cursor;
 
 use crate::utils;
+use crate::utils::plugins::LoadedPlugin;
 
 /// Magic header for canvas files: `b"UWU"` followed by format version byte.
 /// Must be kept in sync with [`CANVAS_FILE_HEADER`].
@@ -1480,10 +1481,12 @@ pub enum MarqueeMatchMode {
 }
 
 /// Deferred commands that execute at the start of the next redraw frame.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum AppCommand {
     SetPresentMode(wgpu::PresentMode),
     UpdateCursorHittest,
+    LoadPlugin(std::path::PathBuf),
+    UnloadAllPlugins,
 }
 
 // 应用程序状态
@@ -1544,6 +1547,9 @@ pub struct AppState {
 
     // utils
     pub toasts: Toasts,
+
+    /// Loaded plugins.
+    pub plugins: Vec<LoadedPlugin>,
 }
 
 impl Default for AppState {
@@ -1585,6 +1591,7 @@ impl Default for AppState {
             toasts: Toasts::default()
                 .with_anchor(egui_notify::Anchor::BottomRight)
                 .with_margin(egui::vec2(20.0, 20.0)),
+            plugins: Vec::new(),
             history: History::default(),
             active_backend: None,
             command_queue: Vec::with_capacity(3),

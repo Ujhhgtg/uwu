@@ -10,6 +10,7 @@ use crate::state::{
 };
 use crate::ui;
 use crate::utils;
+use crate::utils::plugins::load_plugin_from_path;
 use crate::utils::stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start};
 use crate::utils::ui::{apply_theme_mode_and_canvas_color, apply_window_mode};
 use core::f32;
@@ -209,6 +210,33 @@ error: failed to enable premultiplied alpha for window: {:?}
                         && self.state.current_tool == CanvasTool::Passthrough;
                     let _ = window.set_cursor_hittest(!passthrough);
                 }
+                AppCommand::LoadPlugin(path) => {
+                    // SAFETY: plugin loading uses C ABI for the version check before
+                    // touching any Rust ABI code. The version check ensures the same rustc.
+                    match load_plugin_from_path(&path) {
+                        Ok(loaded) => {
+                            let id = loaded.id.clone();
+                            if self.state.plugins.iter().any(|p| p.id == id) {
+                                self.state
+                                    .toasts
+                                    .error(format!("插件 '{}' 已经加载, 请勿重复加载!", id));
+                                // Drop the already-loaded copy immediately so its
+                                // library is released rather than leaked
+                                drop(loaded);
+                            } else {
+                                let name = loaded.name.clone();
+                                self.state.plugins.push(loaded);
+                                self.state.toasts.success(format!("插件加载成功: {}", name));
+                            }
+                        }
+                        Err(e) => {
+                            self.state.toasts.error(format!("插件加载失败: {}", e));
+                        }
+                    }
+                }
+                AppCommand::UnloadAllPlugins => {
+                    self.state.plugins.clear();
+                }
             }
         }
 
@@ -250,6 +278,11 @@ error: failed to enable premultiplied alpha for window: {:?}
         // fixes a borrow checker error
         let ctx = &(render_state.egui_renderer.context().clone());
 
+        // --- plugin hooks ---
+        for loaded in &mut self.state.plugins {
+            loaded.plugin.before_ui();
+        }
+
         // --- ui ---
         {
             #[cfg(feature = "profiling")]
@@ -282,6 +315,11 @@ error: failed to enable premultiplied alpha for window: {:?}
 
                 if self.state.show_page_management_window {
                     ui::ui_pages_manager(&mut self.state, ctx);
+                }
+
+                // --- plugin hooks ---
+                for loaded in &mut self.state.plugins {
+                    loaded.plugin.ui(ctx);
                 }
             }
 

@@ -53,6 +53,9 @@ rkyv = { version = "0.8", features = ["alloc", "bytecheck"] }
 # utils
 pollster = "*"
 dirs = "*"
+interprocess = "*"
+libloading = "*"
+plugin_api = { path = "../plugin_api" }
 
 # features dependencies
 rodio = { version = "*", default-features = false, features = [
@@ -66,7 +69,6 @@ profiling = { version = "*", optional = true, features = [
 puffin = { version = "*", optional = true }
 puffin_egui = { version = "*", optional = true }
 mimalloc = { version = "*", optional = true }
-interprocess = "*"
 
 [build-dependencies]
 winres = "*"

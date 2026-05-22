@@ -678,6 +678,35 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
     });
 
+    collapsing(ui, "plugins", "插件", |ui| {
+        for plugin in &state.plugins {
+            ui.horizontal(|ui| {
+                ui.label(format!(
+                    "{} v{} ({})",
+                    plugin.name, plugin.version, plugin.id
+                ));
+            });
+        }
+
+        if !state.plugins.is_empty() {
+            ui.separator();
+        }
+
+        if ui.button("加载插件").clicked()
+            && let Some(path) = rfd::FileDialog::new()
+                .add_filter("动态库", &["so", "dylib", "dll"])
+                .pick_file()
+        {
+            // defer loading to avoid borrow issues;
+            // push a command that AppState::load_plugin handles on the next redraw
+            state.command_queue.push(AppCommand::LoadPlugin(path));
+        }
+
+        if ui.button("卸载所有插件").clicked() {
+            state.command_queue.push(AppCommand::UnloadAllPlugins);
+        }
+    });
+
     collapsing(ui, "about", "关于", |ui| {
         ui.my_label("uwu (ujhhgtg's whiteboard, unleashed)");
         ui.my_label(format!("版本: {}", env!("CARGO_PKG_VERSION")));

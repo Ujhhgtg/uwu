@@ -29,7 +29,7 @@ pub fn apply_theme_mode_and_canvas_color(
         // let bg_color = Visuals::dark().window_fill;
         ctx.set_visuals(Visuals {
             panel_fill: canvas_color,
-            // extreme_bg_color: bg_color, // for scroll area; this also affects text input field's bg color, which is unwanted
+            // extreme_bg_color: bg_color, // TODO: for scroll area; this also affects text input field's bg color, which is unwanted
             dark_mode: true,
             ..Visuals::dark()
         });
@@ -37,7 +37,7 @@ pub fn apply_theme_mode_and_canvas_color(
         // let bg_color = Visuals::light().window_fill;
         ctx.set_visuals(Visuals {
             panel_fill: canvas_color,
-            // extreme_bg_color: bg_color, // for scroll area; this also affects text input field's bg color, which is unwanted
+            // extreme_bg_color: bg_color, // TODO: for scroll area; this also affects text input field's bg color, which is unwanted
             dark_mode: false,
             ..Visuals::light()
         });
