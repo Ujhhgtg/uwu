@@ -1486,7 +1486,8 @@ pub enum AppCommand {
     SetPresentMode(wgpu::PresentMode),
     UpdateCursorHittest,
     LoadPlugin(std::path::PathBuf),
-    UnloadAllPlugins,
+    // TODO: exiting after doing this triggers a SIGSEGV on linux
+    // UnloadAllPlugins,
 }
 
 // 应用程序状态

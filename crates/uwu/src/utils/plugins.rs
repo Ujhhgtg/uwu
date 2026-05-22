@@ -1,4 +1,4 @@
-use std::ffi::{CStr, c_char};
+use std::ffi::CStr;
 
 use libloading::Library;
 use plugin_api::Plugin;
@@ -15,12 +15,12 @@ use plugin_api::Plugin;
 /// and only then is `dlclose()` called to unload the library.
 /// Reversing this order causes SIGSEGV.
 pub struct LoadedPlugin {
+    /// Plugin identifier.
+    pub id: String,
     /// Name from the plugin itself (cached for display).
     pub name: String,
     /// Version from the plugin itself (cached for display).
     pub version: String,
-    /// Plugin identifier used for deduplication.
-    pub id: String,
     /// ⚠️ MUST be before `_library` — dropped first, so the vtable is
     /// still in memory when the plugin's destructor runs.
     pub plugin: Box<dyn Plugin>,
@@ -37,6 +37,10 @@ impl Drop for LoadedPlugin {
     }
 }
 
+type FnPluginRustcVersion = unsafe fn() -> *const i8;
+
+type FnPluginCreate = unsafe fn() -> *mut (dyn Plugin + 'static);
+
 /// Load a plugin from a dynamic library path.
 ///
 /// # Safety
@@ -52,7 +56,7 @@ pub fn load_plugin_from_path(
     let lib = unsafe { Library::new(path)? };
 
     // Load the rustc version function (C ABI — always safe).
-    let rustc_version_fn: libloading::Symbol<unsafe extern "C" fn() -> *const c_char> =
+    let rustc_version_fn: libloading::Symbol<FnPluginRustcVersion> =
         unsafe { lib.get(b"plugin_rustc_version")? };
 
     let plugin_rustc_version_ptr = unsafe { rustc_version_fn() };
@@ -70,8 +74,7 @@ pub fn load_plugin_from_path(
     }
 
     // Version matches — safe to load the Rust ABI function.
-    let create_fn: libloading::Symbol<unsafe extern "C" fn() -> *mut dyn Plugin> =
-        unsafe { lib.get(b"plugin_create")? };
+    let create_fn: libloading::Symbol<FnPluginCreate> = unsafe { lib.get(b"plugin_create")? };
 
     let plugin_ptr = unsafe { create_fn() };
     // SAFETY: plugin_ptr was created by Box::into_raw from a Box<dyn Plugin>.
@@ -94,9 +97,9 @@ pub fn load_plugin_from_path(
     plugin.init();
 
     Ok(LoadedPlugin {
+        id,
         name,
         version,
-        id,
         _library: lib,
         plugin,
     })

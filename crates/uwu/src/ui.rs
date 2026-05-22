@@ -702,9 +702,10 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             state.command_queue.push(AppCommand::LoadPlugin(path));
         }
 
-        if ui.button("卸载所有插件").clicked() {
-            state.command_queue.push(AppCommand::UnloadAllPlugins);
-        }
+        // TODO: exiting after doing this triggers a SIGSEGV on linux
+        // if ui.button("卸载所有插件").clicked() {
+        //     state.command_queue.push(AppCommand::UnloadAllPlugins);
+        // }
     });
 
     collapsing(ui, "about", "关于", |ui| {

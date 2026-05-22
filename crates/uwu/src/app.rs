@@ -233,10 +233,10 @@ error: failed to enable premultiplied alpha for window: {:?}
                             self.state.toasts.error(format!("插件加载失败: {}", e));
                         }
                     }
-                }
-                AppCommand::UnloadAllPlugins => {
-                    self.state.plugins.clear();
-                }
+                } // TODO: exiting after doing this triggers a SIGSEGV on linux
+                  // AppCommand::UnloadAllPlugins => {
+                  // self.state.plugins.clear();
+                  // }
             }
         }
 
@@ -482,14 +482,14 @@ impl ApplicationHandler<()> for App {
         self.request_helper_repaint_if_needed();
 
         // redraw if egui requests repaint
-        if unsafe {
-            self.render_state
-                .as_ref()
-                .unwrap_unchecked()
-                .egui_renderer
-                .context()
-                .has_requested_repaint()
-        } {
+        if self
+            .render_state
+            .as_ref()
+            .unwrap()
+            .egui_renderer
+            .context()
+            .has_requested_repaint()
+        {
             self.window.as_ref().unwrap().request_redraw();
         }
     }

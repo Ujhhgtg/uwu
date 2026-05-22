@@ -6,17 +6,14 @@ pub const RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 ///
 /// Everything is called from the main render thread (winit event loop).
 pub trait Plugin {
+    /// Unique plugin identifier — must consist only of letters, digits, and underscores.
+    fn id(&self) -> &'static str;
+
     /// Display name shown in the plugin list.
     fn name(&self) -> &'static str;
 
     /// Semantic version string.
     fn version(&self) -> &'static str;
-
-    /// Unique plugin identifier — must consist only of letters, digits, and underscores.
-    ///
-    /// Used for deduplication at load time: two plugins with the same `id` cannot
-    /// be loaded simultaneously.
-    fn id(&self) -> &'static str;
 
     /// Called once immediately after the plugin is constructed and loaded.
     ///

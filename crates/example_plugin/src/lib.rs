@@ -11,16 +11,15 @@ static RUSTC_VERSION_CSTR: &CStr = {
 struct ExamplePlugin;
 
 impl Plugin for ExamplePlugin {
+    fn id(&self) -> &'static str {
+        "example_plugin"
+    }
     fn name(&self) -> &'static str {
         "示例插件"
     }
 
     fn version(&self) -> &'static str {
         "0.1.0"
-    }
-
-    fn id(&self) -> &'static str {
-        "example_plugin"
     }
 
     fn init(&mut self) {
