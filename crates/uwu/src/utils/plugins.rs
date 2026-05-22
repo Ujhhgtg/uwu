@@ -1,3 +1,6 @@
+use std::error::Error;
+use std::fmt;
+
 use std::ffi::CStr;
 
 use libloading::Library;
@@ -37,6 +40,21 @@ impl Drop for LoadedPlugin {
     }
 }
 
+/// Error returned when attempting to load a plugin whose id is already loaded.
+#[derive(Debug)]
+pub struct PluginAlreadyLoaded {
+    /// The duplicate plugin id.
+    pub id: String,
+}
+
+impl fmt::Display for PluginAlreadyLoaded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "plugin '{}' already loaded", self.id)
+    }
+}
+
+impl Error for PluginAlreadyLoaded {}
+
 type FnPluginRustcVersion = unsafe fn() -> *const i8;
 
 type FnPluginCreate = unsafe fn() -> *mut (dyn Plugin + 'static);
@@ -49,6 +67,7 @@ type FnPluginCreate = unsafe fn() -> *mut (dyn Plugin + 'static);
 /// because the rustc version is checked (via raw C ABI) before any Rust ABI code runs.
 pub fn load_plugin_from_path(
     path: &std::path::Path,
+    existing_ids: &[&str],
 ) -> Result<LoadedPlugin, Box<dyn std::error::Error>> {
     // SAFETY: libloading::Library::new() opens the .so without executing any code.
     // The first function we call is the C ABI version check, which is safe regardless
@@ -93,6 +112,16 @@ pub fn load_plugin_from_path(
 
     let name = plugin.name().to_string();
     let version = plugin.version().to_string();
+
+    // Check for duplicate BEFORE calling init(), so init/uninit are never
+    // called on a plugin that will be discarded.
+    if existing_ids.iter().any(|eid| *eid == id) {
+        // Drop the plugin (vtable still valid — lib is still loaded) then the
+        // library handle itself. init() was never called so uninit() is skipped.
+        drop(plugin);
+        drop(lib);
+        return Err(Box::new(PluginAlreadyLoaded { id }));
+    }
 
     plugin.init();
 

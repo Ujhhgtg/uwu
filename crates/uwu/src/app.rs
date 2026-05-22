@@ -10,7 +10,7 @@ use crate::state::{
 };
 use crate::ui;
 use crate::utils;
-use crate::utils::plugins::load_plugin_from_path;
+use crate::utils::plugins::{PluginAlreadyLoaded, load_plugin_from_path};
 use crate::utils::stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start};
 use crate::utils::ui::{apply_theme_mode_and_canvas_color, apply_window_mode};
 use core::f32;
@@ -211,26 +211,22 @@ error: failed to enable premultiplied alpha for window: {:?}
                     let _ = window.set_cursor_hittest(!passthrough);
                 }
                 AppCommand::LoadPlugin(path) => {
-                    // SAFETY: plugin loading uses C ABI for the version check before
-                    // touching any Rust ABI code. The version check ensures the same rustc.
-                    match load_plugin_from_path(&path) {
+                    let existing: Vec<&str> =
+                        self.state.plugins.iter().map(|p| p.id.as_str()).collect();
+                    match load_plugin_from_path(&path, &existing) {
                         Ok(loaded) => {
-                            let id = loaded.id.clone();
-                            if self.state.plugins.iter().any(|p| p.id == id) {
-                                self.state
-                                    .toasts
-                                    .error(format!("插件 '{}' 已经加载, 请勿重复加载!", id));
-                                // Drop the already-loaded copy immediately so its
-                                // library is released rather than leaked
-                                drop(loaded);
-                            } else {
-                                let name = loaded.name.clone();
-                                self.state.plugins.push(loaded);
-                                self.state.toasts.success(format!("插件加载成功: {}", name));
-                            }
+                            let name = loaded.name.clone();
+                            self.state.plugins.push(loaded);
+                            self.state.toasts.success(format!("插件加载成功: {}", name));
                         }
                         Err(e) => {
-                            self.state.toasts.error(format!("插件加载失败: {}", e));
+                            if let Some(dup) = e.downcast_ref::<PluginAlreadyLoaded>() {
+                                self.state
+                                    .toasts
+                                    .error(format!("插件 '{}' 已经加载, 请勿重复加载!", dup.id));
+                            } else {
+                                self.state.toasts.error(format!("插件加载失败: {}", e));
+                            }
                         }
                     }
                 } // TODO: exiting after doing this triggers a SIGSEGV on linux
