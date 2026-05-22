@@ -2,8 +2,6 @@ use crate::assets::ICON;
 use crate::passthrough_helper::PassthroughHelper;
 use crate::render::RenderState;
 use crate::single_instance;
-#[cfg(feature = "startup_animation")]
-use crate::state::StartupAnimation;
 use crate::state::{
     AppCommand, AppState, CanvasObject, CanvasObjectOps, CanvasTool, HistoryCommand, InsertTab,
     MarqueeMatchMode, PointerInteraction, PointerState,
@@ -54,15 +52,6 @@ impl App {
 
         if !state.persistent.show_welcome_window_on_start {
             state.show_welcome_window = false
-        }
-
-        #[cfg(feature = "startup_animation")]
-        if state.persistent.show_startup_animation {
-            state.startup_animation = Some(StartupAnimation::new(
-                30.0,
-                crate::assets::STARTUP_FRAMES,
-                crate::assets::STARTUP_AUDIO,
-            ));
         }
 
         Self {
@@ -291,15 +280,6 @@ error: failed to enable premultiplied alpha for window: {:?}
 
                 #[cfg(feature = "profiling")]
                 puffin_egui::profiler_window(ctx);
-
-                #[cfg(feature = "startup_animation")]
-                if let Some(anim) = &mut self.state.startup_animation {
-                    if !anim.is_finished() {
-                        anim.update(ctx);
-                        anim.draw_fullscreen(ctx);
-                        ctx.request_repaint(); // ensure smooth playback
-                    }
-                }
 
                 if self.state.show_welcome_window {
                     ui::ui_welcome(&mut self.state, ctx);

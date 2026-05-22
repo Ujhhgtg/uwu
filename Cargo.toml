@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/plugin_api","crates/uwu","crates/example_plugin"]
+members = [
+    "crates/plugin_api",
+    "crates/uwu",
+    "crates/example_plugin",
+    "crates/startup_animation_plugin",
+]
 resolver = "3"
 
 [patch.crates-io]

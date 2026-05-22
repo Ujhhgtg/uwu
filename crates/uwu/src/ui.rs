@@ -216,12 +216,6 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             ui.checkbox(&mut state.persistent.show_welcome_window_on_start, "");
         });
 
-        #[cfg(feature = "startup_animation")]
-        ui.horizontal(|ui| {
-            ui.my_label("显示启动动画:");
-            ui.checkbox(&mut state.persistent.show_startup_animation, "");
-        });
-
         ui.horizontal(|ui| {
             ui.my_label("窗口透明度");
             ui.add(egui::Slider::new(

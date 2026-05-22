@@ -2761,6 +2761,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "startup_animation_plugin"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "image",
+ "plugin_api",
+ "rodio",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3096,7 +3106,6 @@ dependencies = [
  "puffin_egui",
  "rfd",
  "rkyv",
- "rodio",
  "serde",
  "serde_json",
  "ttf-parser",

@@ -9,7 +9,6 @@ license-file = "LICENSE"
 
 [features]
 default = ["system_font"]
-startup_animation = ["rodio"]
 embedded_font = []
 system_font = ["fontdb"]
 profiling = ["dep:profiling", "puffin", "puffin_egui"]
@@ -58,10 +57,6 @@ libloading = "*"
 plugin_api = { path = "../plugin_api" }
 
 # features dependencies
-rodio = { version = "*", default-features = false, features = [
-    "wav",
-    "playback",
-], optional = true }
 fontdb = { version = "*", optional = true }
 profiling = { version = "*", optional = true, features = [
     "profile-with-puffin",
