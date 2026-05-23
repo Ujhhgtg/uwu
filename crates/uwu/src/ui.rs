@@ -508,6 +508,12 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             }
         });
 
+        // HDR 模式切换
+        ui.horizontal(|ui| {
+            ui.my_label("HDR 模式 [需重启以应用]:");
+            ui.checkbox(&mut state.persistent.hdr, "启用 (HDR 显示器自动检测)");
+        });
+
         ui.horizontal(|ui| {
             ui.my_label("优化策略 [需重启以应用]:");
             ui.selectable_value(
@@ -681,10 +687,9 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                     "{} v{} ({})",
                     plugin.name, plugin.version, plugin.id
                 ));
-                if state.persistent.plugin_paths.contains(&plugin.path) {
-                    if ui.button("X").clicked() {
-                        paths_to_remove.push(path);
-                    }
+                if state.persistent.plugin_paths.contains(&plugin.path) && ui.button("X").clicked()
+                {
+                    paths_to_remove.push(path);
                 }
             });
         }
@@ -706,7 +711,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             state.command_queue.push(AppCommand::LoadPlugin(path));
         }
 
-        // TODO: exiting after doing this triggers a SIGSEGV on linux
+        // FIXME: exiting after doing this triggers a SIGSEGV on linux
         // if ui.button("卸载所有插件").clicked() {
         //     state.command_queue.push(AppCommand::UnloadAllPlugins);
         // }

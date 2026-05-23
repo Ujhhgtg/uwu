@@ -40,6 +40,8 @@ image = { version = "*", default-features = false, features = [
     "jpeg",
     "png",
     "webp",
+    "exr",
+    "rayon",
 ] }
 ttf-parser = "*"
 rfd = "*"

@@ -14,7 +14,8 @@ use crate::utils::ui::{apply_theme_mode_and_canvas_color, apply_window_mode};
 use core::f32;
 use egui::{Pos2, Vec2};
 use egui_wgpu::{ScreenDescriptor, wgpu};
-use image::GenericImageView;
+use image::{ExtendedColorType, GenericImageView, ImageEncoder, codecs::openexr::OpenExrEncoder};
+use std::io::BufWriter;
 use std::sync::Arc;
 use wgpu::{
     BackendOptions, CurrentSurfaceTexture, InstanceDescriptor, TexelCopyBufferInfo,
@@ -154,6 +155,7 @@ error: failed to enable premultiplied alpha for window: {:?}
             initial_height,
             self.state.persistent.optimization_policy,
             self.state.persistent.present_mode,
+            self.state.persistent.hdr,
         )
         .await;
 
@@ -187,6 +189,23 @@ error: failed to enable premultiplied alpha for window: {:?}
             .as_mut()
             .unwrap()
             .resize_surface(width, height);
+    }
+
+    /// Convert an IEEE 754 half-precision (binary16) value to f32.
+    fn half_to_f32(bits: u16) -> f32 {
+        let sign = ((bits >> 15) as u32) << 31;
+        let exp = (bits >> 10) & 0x1f;
+        let mant = (bits & 0x3ff) as u32;
+        let bits = if exp == 0 {
+            // subnormal or zero — flush subnormals to zero
+            if mant == 0 { sign } else { sign | (mant << 13) }
+        } else if exp == 31 {
+            // inf/nan
+            sign | 0x7f800000 | (mant << 13)
+        } else {
+            sign | ((exp as u32 + 112) << 23) | (mant << 13)
+        };
+        f32::from_bits(bits)
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]
@@ -237,7 +256,7 @@ error: failed to enable premultiplied alpha for window: {:?}
                             }
                         }
                     }
-                } // TODO: exiting after doing this triggers a SIGSEGV on linux
+                } // FIXME: exiting after doing this triggers a SIGSEGV on linux
                   // AppCommand::UnloadAllPlugins => {
                   // self.state.plugins.clear();
                   // }
@@ -335,130 +354,228 @@ error: failed to enable premultiplied alpha for window: {:?}
                 &surface_view,
                 screen_descriptor,
             );
-        }
 
-        // submit & present texture
-        if let Some(path) = screenshot_path {
-            #[cfg(feature = "profiling")]
-            profiling::scope!("handle_redraw::screenshot");
-
-            let width = render_state.surface_config.width;
-            let height = render_state.surface_config.height;
-
-            let bytes_per_pixel = 4;
-            let unpadded_bytes_per_row = width * bytes_per_pixel;
-
-            // wgpu requires 256-byte alignment
-            const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-            let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(ALIGN) * ALIGN;
-
-            let buffer_size = (padded_bytes_per_row * height) as u64;
-
-            let output_buffer = render_state.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("screenshot buffer"),
-                size: buffer_size,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
-
-            encoder.copy_texture_to_buffer(
-                TexelCopyTextureInfo {
-                    texture: &surface_texture.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                TexelCopyBufferInfo {
-                    buffer: &output_buffer,
-                    layout: TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(padded_bytes_per_row),
-                        rows_per_image: Some(height),
-                    },
-                },
-                wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-            );
-
-            render_state.queue.submit(Some(encoder.finish()));
-
-            let buffer_slice = output_buffer.slice(..);
-
-            buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-
-            // ensure gpu work is done
-            let _ = render_state.device.poll(wgpu::wgt::PollType::Wait {
-                submission_index: None,
-                timeout: None,
-            });
-
-            let data = buffer_slice.get_mapped_range();
-
-            let mut pixels = vec![0u8; (width * height * 4) as usize];
-
-            for y in 0..height as usize {
-                let src_offset = y * padded_bytes_per_row as usize;
-                let dst_offset = y * unpadded_bytes_per_row as usize;
-
-                pixels[dst_offset..dst_offset + unpadded_bytes_per_row as usize].copy_from_slice(
-                    &data[src_offset..src_offset + unpadded_bytes_per_row as usize],
-                );
+            // HDR: apply sRGB-to-linear conversion so colors render correctly on
+            // Rgba16Float surfaces (which lack the automatic conversion of Bgra8UnormSrgb).
+            if render_state.is_hdr() {
+                let w = render_state.surface_config.width;
+                let h = render_state.surface_config.height;
+                render_state.apply_hdr_conversion(&mut encoder, &surface_texture, w, h);
             }
 
-            // pixels
-            //     .chunks_exact(width as usize * 4)
-            //     .collect::<Vec<_>>()
-            //     .into_iter()
-            //     .rev()
-            //     .flatten()
-            //     .copied()
-            //     .collect::<Vec<u8>>();
+            // submit & present texture
+            if let Some(path) = screenshot_path {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("handle_redraw::screenshot");
 
-            for chunk in pixels.chunks_exact_mut(4) {
-                chunk.swap(0, 2); // B ↔ R
-            }
+                let width = render_state.surface_config.width;
+                let height = render_state.surface_config.height;
+                const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 
-            match image::save_buffer(path, &pixels, width, height, image::ColorType::Rgba8) {
-                Ok(_) => {
-                    self.state.toasts.success("成功导出为图片!");
-                }
-                Err(err) => {
-                    self.state.toasts.error(format!("图片导出失败: {}!", err));
-                }
-            }
+                if render_state.is_hdr() {
+                    // HDR path: read half-float pixels, convert to f32, save as EXR
+                    let exr_path = path.with_extension("exr");
+                    let file = match std::fs::File::create(&exr_path) {
+                        Ok(f) => f,
+                        Err(err) => {
+                            self.state
+                                .toasts
+                                .error(format!("EXR 文件创建失败: {}!", err));
+                            self.state.screenshot_path = None;
+                            return;
+                        }
+                    };
 
-            drop(data);
-            output_buffer.unmap();
+                    let bytes_per_pixel = 8u32;
+                    let unpadded_bytes_per_row = width * bytes_per_pixel;
+                    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(ALIGN) * ALIGN;
+                    let buffer_size = (padded_bytes_per_row * height) as u64;
 
-            self.state.screenshot_path = None;
-        } else {
-            render_state.queue.submit(Some(encoder.finish()));
-        }
+                    let output_buffer =
+                        render_state.device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("screenshot buffer"),
+                            size: buffer_size,
+                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                            mapped_at_creation: false,
+                        });
 
-        {
-            #[cfg(feature = "profiling")]
-            profiling::scope!("handle_redraw::gc");
+                    encoder.copy_texture_to_buffer(
+                        TexelCopyTextureInfo {
+                            texture: &surface_texture.texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        TexelCopyBufferInfo {
+                            buffer: &output_buffer,
+                            layout: TexelCopyBufferLayout {
+                                offset: 0,
+                                bytes_per_row: Some(padded_bytes_per_row),
+                                rows_per_image: Some(height),
+                            },
+                        },
+                        wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
 
-            self.state.canvas.objects.retain(|obj| {
-                if let CanvasObject::Image(img) = obj {
-                    !img.marked_for_deletion
+                    render_state.queue.submit(Some(encoder.finish()));
+
+                    let buffer_slice = output_buffer.slice(..);
+                    buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+                    let _ = render_state.device.poll(wgpu::wgt::PollType::Wait {
+                        submission_index: None,
+                        timeout: None,
+                    });
+
+                    let data = buffer_slice.get_mapped_range();
+                    let half_data: &[u16] = unsafe {
+                        std::slice::from_raw_parts(data.as_ptr() as *const u16, data.len() / 2)
+                    };
+
+                    let elem_stride = 4usize;
+                    let total_pixels = (width as usize) * (height as usize) * elem_stride;
+                    let mut pixels_half = vec![0u16; total_pixels];
+                    let elem_per_row = (padded_bytes_per_row / 2) as usize;
+                    for y in 0..height as usize {
+                        let src_offset = y * elem_per_row;
+                        let dst_offset = y * (width as usize) * elem_stride;
+                        pixels_half[dst_offset..dst_offset + (width as usize) * elem_stride]
+                            .copy_from_slice(
+                                &half_data[src_offset..src_offset + (width as usize) * elem_stride],
+                            );
+                    }
+
+                    drop(data);
+                    output_buffer.unmap();
+
+                    // Convert half-float to f32
+                    let mut pixels_f32: Vec<f32> = Vec::with_capacity(pixels_half.len());
+                    for h in pixels_half {
+                        pixels_f32.push(Self::half_to_f32(h));
+                    }
+                    let f32_bytes: &[u8] = unsafe {
+                        std::slice::from_raw_parts(
+                            pixels_f32.as_ptr() as *const u8,
+                            pixels_f32.len() * 4,
+                        )
+                    };
+
+                    let writer = BufWriter::new(file);
+                    let encoder = OpenExrEncoder::new(writer);
+                    match encoder.write_image(f32_bytes, width, height, ExtendedColorType::Rgba32F)
+                    {
+                        Ok(_) => {
+                            self.state.toasts.success("成功导出为 HDR 图片 (EXR)!");
+                        }
+                        Err(err) => {
+                            self.state.toasts.error(format!("EXR 导出失败: {}!", err));
+                        }
+                    }
                 } else {
-                    true
+                    // SDR path: read BGRA8 pixels, swap B↔R, save as PNG
+                    let bytes_per_pixel = 4u32;
+                    let unpadded_bytes_per_row = width * bytes_per_pixel;
+                    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(ALIGN) * ALIGN;
+                    let buffer_size = (padded_bytes_per_row * height) as u64;
+
+                    let output_buffer =
+                        render_state.device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("screenshot buffer"),
+                            size: buffer_size,
+                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                            mapped_at_creation: false,
+                        });
+
+                    encoder.copy_texture_to_buffer(
+                        TexelCopyTextureInfo {
+                            texture: &surface_texture.texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        TexelCopyBufferInfo {
+                            buffer: &output_buffer,
+                            layout: TexelCopyBufferLayout {
+                                offset: 0,
+                                bytes_per_row: Some(padded_bytes_per_row),
+                                rows_per_image: Some(height),
+                            },
+                        },
+                        wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+
+                    render_state.queue.submit(Some(encoder.finish()));
+
+                    let buffer_slice = output_buffer.slice(..);
+                    buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+                    let _ = render_state.device.poll(wgpu::wgt::PollType::Wait {
+                        submission_index: None,
+                        timeout: None,
+                    });
+
+                    let data = buffer_slice.get_mapped_range();
+                    let mut pixels = vec![0u8; (width * height * 4) as usize];
+                    for y in 0..height as usize {
+                        let src_offset = y * padded_bytes_per_row as usize;
+                        let dst_offset = y * unpadded_bytes_per_row as usize;
+                        pixels[dst_offset..dst_offset + unpadded_bytes_per_row as usize]
+                            .copy_from_slice(
+                                &data[src_offset..src_offset + unpadded_bytes_per_row as usize],
+                            );
+                    }
+                    // B ↔ R swap (Bgra8UnormSrgb → Rgba8)
+                    for chunk in pixels.chunks_exact_mut(4) {
+                        chunk.swap(0, 2);
+                    }
+
+                    match image::save_buffer(&path, &pixels, width, height, image::ColorType::Rgba8)
+                    {
+                        Ok(_) => {
+                            self.state.toasts.success("成功导出为图片!");
+                        }
+                        Err(err) => {
+                            self.state.toasts.error(format!("图片导出失败: {}!", err));
+                        }
+                    }
+
+                    drop(data);
+                    output_buffer.unmap();
                 }
-            });
+
+                self.state.screenshot_path = None;
+            } else {
+                render_state.queue.submit(Some(encoder.finish()));
+            }
+
+            {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("handle_redraw::gc");
+
+                self.state.canvas.objects.retain(|obj| {
+                    if let CanvasObject::Image(img) = obj {
+                        !img.marked_for_deletion
+                    } else {
+                        true
+                    }
+                });
+            }
+
+            surface_texture.present();
+
+            if self.state.persistent.show_fps {
+                _ = self.state.fps_counter.update();
+            }
+
+            #[cfg(feature = "profiling")]
+            profiling::finish_frame!();
         }
-
-        surface_texture.present();
-
-        if self.state.persistent.show_fps {
-            _ = self.state.fps_counter.update();
-        }
-
-        #[cfg(feature = "profiling")]
-        profiling::finish_frame!();
     }
 }
 

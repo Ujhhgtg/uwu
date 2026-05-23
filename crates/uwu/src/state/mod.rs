@@ -765,6 +765,7 @@ pub struct PersistentState {
     pub click_or_drag_to_single_select: bool,
 
     #[serde(default)]
+    pub hdr: bool,
     pub plugin_paths: Vec<PathBuf>,
 }
 
@@ -795,6 +796,7 @@ impl Default for PersistentState {
             show_welcome_window_on_start: true,
             show_startup_animation: true,
 
+            hdr: true,
             easter_egg_redo: false,
             plugin_paths: Vec::new(),
         }
@@ -1365,7 +1367,7 @@ pub enum AppCommand {
     SetPresentMode(wgpu::PresentMode),
     UpdateCursorHittest,
     LoadPlugin(std::path::PathBuf),
-    // TODO: exiting after doing this triggers a SIGSEGV on linux
+    // FIXME: exiting after doing this triggers a SIGSEGV on linux
     // UnloadAllPlugins,
 }
 
