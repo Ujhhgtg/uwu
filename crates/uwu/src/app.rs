@@ -237,7 +237,7 @@ error: failed to enable premultiplied alpha for window: {:?}
                             }
                         }
                     }
-                } // TODO: exiting after doing this triggers a SIGSEGV on linux
+                } // FIXME: exiting after doing this triggers a SIGSEGV on linux
                   // AppCommand::UnloadAllPlugins => {
                   // self.state.plugins.clear();
                   // }
