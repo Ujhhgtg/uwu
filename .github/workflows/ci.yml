@@ -24,9 +24,11 @@ jobs:
                       arch: x86_64
 
                     # ---------- Windows ----------
-                    - name: windows-x86_64
-                      os: windows-latest
-                      arch: x86_64
+                    # FIXME: LINK : fatal error LNK1189: library limit of 65535 objects exceeded
+                    # use cross-win-x86_64 for now
+                    # - name: windows-x86_64
+                    #   os: windows-latest
+                    #   arch: x86_64
 
                     # ---------- macOS Intel ----------
                     - name: macos-x86_64
