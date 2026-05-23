@@ -54,6 +54,15 @@ impl App {
             state.show_welcome_window = false
         }
 
+        // Auto-load plugins from persistent settings
+        for path in state.persistent.plugin_paths.clone() {
+            let existing: Vec<&str> = state.plugins.iter().map(|p| p.id.as_str()).collect();
+            match load_plugin_from_path(path, &existing) {
+                Ok(loaded) => state.plugins.push(loaded),
+                Err(e) => eprintln!("warning: failed to auto-load plugin: {}", e),
+            }
+        }
+
         Self {
             gpu_instance,
             render_state: None,
@@ -200,16 +209,26 @@ error: failed to enable premultiplied alpha for window: {:?}
                     let _ = window.set_cursor_hittest(!passthrough);
                 }
                 AppCommand::LoadPlugin(path) => {
+                    let plugin_path = path.clone();
                     let existing: Vec<&str> =
                         self.state.plugins.iter().map(|p| p.id.as_str()).collect();
-                    match load_plugin_from_path(&path, &existing) {
+                    match load_plugin_from_path(path, &existing) {
                         Ok(loaded) => {
                             let name = loaded.name.clone();
+                            let loaded_path = loaded.path.clone();
+                            // Persist the plugin path if not already tracked
+                            if !self.state.persistent.plugin_paths.contains(&loaded_path) {
+                                self.state.persistent.plugin_paths.push(loaded_path);
+                            }
                             self.state.plugins.push(loaded);
                             self.state.toasts.success(format!("插件加载成功: {}", name));
                         }
                         Err(e) => {
                             if let Some(dup) = e.downcast_ref::<PluginAlreadyLoaded>() {
+                                // Re-add to persistent paths even if already loaded
+                                if !self.state.persistent.plugin_paths.contains(&plugin_path) {
+                                    self.state.persistent.plugin_paths.push(plugin_path);
+                                }
                                 self.state
                                     .toasts
                                     .error(format!("插件 '{}' 已经加载, 请勿重复加载!", dup.id));

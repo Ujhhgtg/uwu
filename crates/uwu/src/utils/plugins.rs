@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::path::PathBuf;
 
 use std::ffi::CStr;
 
@@ -24,6 +25,8 @@ pub struct LoadedPlugin {
     pub name: String,
     /// Version from the plugin itself (cached for display).
     pub version: String,
+    /// Path this plugin was loaded from.
+    pub path: PathBuf,
     /// ⚠️ MUST be before `_library` — dropped first, so the vtable is
     /// still in memory when the plugin's destructor runs.
     pub plugin: Box<dyn Plugin>,
@@ -66,13 +69,13 @@ type FnPluginCreate = unsafe fn() -> *mut (dyn Plugin + 'static);
 /// This function calls `extern "C"` functions on the loaded library. It is safe
 /// because the rustc version is checked (via raw C ABI) before any Rust ABI code runs.
 pub fn load_plugin_from_path(
-    path: &std::path::Path,
+    path: PathBuf,
     existing_ids: &[&str],
 ) -> Result<LoadedPlugin, Box<dyn std::error::Error>> {
     // SAFETY: libloading::Library::new() opens the .so without executing any code.
     // The first function we call is the C ABI version check, which is safe regardless
     // of rustc mismatch.
-    let lib = unsafe { Library::new(path)? };
+    let lib = unsafe { Library::new(path.as_path())? };
 
     // Load the rustc version function (C ABI — always safe).
     let rustc_version_fn: libloading::Symbol<FnPluginRustcVersion> =
@@ -129,6 +132,7 @@ pub fn load_plugin_from_path(
         id,
         name,
         version,
+        path,
         _library: lib,
         plugin,
     })

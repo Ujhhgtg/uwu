@@ -673,13 +673,23 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
     });
 
     collapsing(ui, "plugins", "插件", |ui| {
+        let mut paths_to_remove: Vec<std::path::PathBuf> = Vec::new();
         for plugin in &state.plugins {
+            let path = plugin.path.clone();
             ui.horizontal(|ui| {
-                ui.label(format!(
+                ui.my_label(format!(
                     "{} v{} ({})",
                     plugin.name, plugin.version, plugin.id
                 ));
+                if state.persistent.plugin_paths.contains(&plugin.path) {
+                    if ui.button("X").clicked() {
+                        paths_to_remove.push(path);
+                    }
+                }
             });
+        }
+        for path in &paths_to_remove {
+            state.persistent.plugin_paths.retain(|p| p != path);
         }
 
         if !state.plugins.is_empty() {

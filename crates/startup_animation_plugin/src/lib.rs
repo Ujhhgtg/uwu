@@ -25,7 +25,7 @@ struct StartupAnimationPlugin {
     last_frame_index: usize,
 
     // Audio
-    _audio_sink: Option<Player>,
+    audio: &'static [u8],
 
     finished: bool,
 }
@@ -44,6 +44,7 @@ impl Plugin for StartupAnimationPlugin {
 
     fn init(&mut self) {
         println!("[startup animation plugin] plugin loaded!");
+        Self::play_audio(self.audio).detach();
     }
 
     fn uninit(&mut self) {
@@ -67,12 +68,12 @@ impl StartupAnimationPlugin {
             frames,
             texture: None,
             last_frame_index: usize::MAX,
-            _audio_sink: Some(Self::play_audio(audio)),
+            audio,
             finished: false,
         }
     }
 
-    fn play_audio(audio: &'static [u8]) -> Player {
+    pub fn play_audio(audio: &'static [u8]) -> Player {
         let handle = DeviceSinkBuilder::open_default_sink().expect("failed to open stream");
 
         let player = Player::connect_new(handle.mixer());

@@ -763,6 +763,9 @@ pub struct PersistentState {
     pub easter_egg_redo: bool,
     #[serde(default)]
     pub click_or_drag_to_single_select: bool,
+
+    #[serde(default)]
+    pub plugin_paths: Vec<PathBuf>,
 }
 
 impl Default for PersistentState {
@@ -793,6 +796,7 @@ impl Default for PersistentState {
             show_startup_animation: true,
 
             easter_egg_redo: false,
+            plugin_paths: Vec::new(),
         }
     }
 }
