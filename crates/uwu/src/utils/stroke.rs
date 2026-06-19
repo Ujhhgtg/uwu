@@ -253,3 +253,32 @@ fn apply_stroke_smoothing(points: &[Pos2]) -> Vec<Pos2> {
 
     final_points
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::Pos2;
+
+    #[test]
+    fn test_apply_stroke_smoothing_few_points() {
+        let points = vec![Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)];
+        let smoothed = apply_stroke_smoothing(&points);
+        assert_eq!(smoothed.len(), 2);
+        assert_eq!(smoothed[0], Pos2::new(0.0, 0.0));
+        assert_eq!(smoothed[1], Pos2::new(1.0, 1.0));
+    }
+
+    #[test]
+    fn test_apply_stroke_smoothing_many_points() {
+        let mut points = Vec::new();
+        for i in 0..100 {
+            points.push(Pos2::new(i as f32, i as f32));
+        }
+        let smoothed = apply_stroke_smoothing(&points);
+        assert!(smoothed.len() >= 2);
+        assert_eq!(smoothed.first().unwrap(), &Pos2::new(0.0, 0.0));
+        // The exact coordinates of the last point may vary due to moving average and corner cutting.
+        let last = smoothed.last().unwrap();
+        assert!(last.x > 90.0 && last.y > 90.0);
+    }
+}

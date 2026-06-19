@@ -1,4 +1,6 @@
+pub mod associations;
 pub mod dark_mode;
+pub mod export;
 pub mod plugins;
 pub mod single_instance;
 pub mod stroke;
@@ -577,7 +579,7 @@ pub fn triangulate_polygon(polygon: &[Pos2]) -> Vec<[Pos2; 3]> {
         area += (polygon[j].x + polygon[i].x) * (polygon[j].y - polygon[i].y);
         j = i;
     }
-    let is_ccw = area > 0.0;
+    let is_ccw = area < 0.0;
 
     let mut iterations = 0;
     // Allow enough iterations for worst-case O(n²)
@@ -722,4 +724,48 @@ fn perpendicular_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let t = t.clamp(0.0, 1.0);
     let proj = Pos2::new(a.x + t * dx, a.y + t * dy);
     p.distance(proj)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_triangulate_polygon_ccw_convex() {
+        let polygon = vec![
+            Pos2::new(0.0, 0.0),
+            Pos2::new(0.0, 100.0),
+            Pos2::new(100.0, 100.0),
+            Pos2::new(100.0, 0.0),
+        ];
+        let triangles = triangulate_polygon(&polygon);
+        assert_eq!(triangles.len(), 2);
+    }
+
+    #[test]
+    fn test_triangulate_polygon_cw_convex() {
+        let polygon = vec![
+            Pos2::new(0.0, 0.0),
+            Pos2::new(100.0, 0.0),
+            Pos2::new(100.0, 100.0),
+            Pos2::new(0.0, 100.0),
+        ];
+        let triangles = triangulate_polygon(&polygon);
+        assert_eq!(triangles.len(), 2);
+    }
+
+    #[test]
+    fn test_triangulate_polygon_concave() {
+        // L-shaped concave polygon (CCW)
+        let polygon = vec![
+            Pos2::new(0.0, 0.0),
+            Pos2::new(0.0, 200.0),
+            Pos2::new(100.0, 200.0),
+            Pos2::new(100.0, 100.0),
+            Pos2::new(200.0, 100.0),
+            Pos2::new(200.0, 0.0),
+        ];
+        let triangles = triangulate_polygon(&polygon);
+        assert_eq!(triangles.len(), 4);
+    }
 }

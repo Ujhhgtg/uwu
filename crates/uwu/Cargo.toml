@@ -1,7 +1,7 @@
 [package]
 name = "uwu"
 description = "A powerful digital whiteboard built with Rust, winit, egui, and wgpu."
-version = "0.4.2"
+version = "0.5.0"
 authors = ["Fey Xie <feyxiexzf@gmail.com>"]
 edition = "2024"
 repository = "https://github.com/Ujhhgtg/uwu/"
@@ -44,11 +44,13 @@ image = { version = "*", default-features = false, features = [
 ] }
 ttf-parser = "*"
 rfd = "*"
+printpdf = "0.9"
+
 
 # serialization
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
-rkyv = { version = "0.8", features = ["alloc", "bytecheck"] }
+bitcode = "0.6"
 
 # utils
 pollster = "*"

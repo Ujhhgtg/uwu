@@ -1,13 +1,6 @@
-mod app;
-mod assets;
-mod passthrough_helper;
-mod render;
-mod state;
-mod ui;
-mod utils;
-
-use crate::utils::single_instance;
 use std::backtrace::Backtrace;
+
+use uwu::utils::single_instance;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -21,7 +14,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 #[cfg(not(target_os = "android"))]
 fn main() {
     #[cfg(target_os = "linux")]
-    utils::linux::silence_glib_logs();
+    uwu::utils::linux::silence_glib_logs();
 
     #[cfg(windows)]
     unsafe {
@@ -62,7 +55,13 @@ fn main() {
 
 #[cfg(not(target_os = "android"))]
 async fn run_desktop() {
-    match single_instance::check() {
+    let arg_path = std::env::args().nth(1).map(|p| {
+        std::path::Path::new(&p)
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(p))
+    });
+
+    match single_instance::check(arg_path.clone()) {
         Ok(single_instance::SingleInstance::NotFirst) => {
             println!("another instance is already running");
             return;
@@ -73,8 +72,17 @@ async fn run_desktop() {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    uwu::utils::associations::check_and_update_linux_desktop_file();
+
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = app::App::new();
+
+    if let Ok(mut lock) = single_instance::EVENT_LOOP_PROXY.lock() {
+        *lock = Some(event_loop.create_proxy());
+    }
+
+    let mut app = uwu::app::App::new();
+    app.state.initial_file = arg_path;
     event_loop.run_app(&mut app).expect("failed to run app");
 }

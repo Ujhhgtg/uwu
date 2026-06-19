@@ -58,21 +58,36 @@ pub fn apply_window_mode(state: &mut AppState, window: &Arc<Window>) {
                 && let Some(mode) = state.fullscreen_video_modes.get(selected_index)
             {
                 window.set_fullscreen(Some(Fullscreen::Exclusive(mode.clone())));
-                return;
+            } else {
+                // 回退到第一个可用的视频模式
+                window.set_fullscreen(Some(Fullscreen::Exclusive(
+                    state
+                        .fullscreen_video_modes
+                        .first()
+                        .expect("no video mode available")
+                        .clone(),
+                )));
             }
-
-            // 回退到第一个可用的视频模式
-            window.set_fullscreen(Some(Fullscreen::Exclusive(
-                state
-                    .fullscreen_video_modes
-                    .first()
-                    .expect("no video mode available")
-                    .clone(),
-            )));
         }
         WindowMode::BorderlessFullscreen => {
             // 无边框全屏
             window.set_fullscreen(Some(Fullscreen::Borderless(window.current_monitor())));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let is_fullscreen = matches!(
+            state.persistent.window_mode,
+            WindowMode::ExclusiveFullscreen | WindowMode::BorderlessFullscreen
+        );
+        let disable = is_fullscreen && state.persistent.disable_edge_gestures;
+        if let Some(hwnd) = crate::utils::windows::winit_window_to_hwnd(window) {
+            if crate::utils::windows::is_windows_10_or_greater() {
+                unsafe {
+                    let _ = crate::utils::windows::disable_edge_gestures(hwnd, disable);
+                }
+            }
         }
     }
 }

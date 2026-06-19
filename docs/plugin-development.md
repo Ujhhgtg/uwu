@@ -27,7 +27,7 @@ crate-type = ["dylib"]
 
 [dependencies]
 plugin_api = { path = "../path/to/plugin_api" }
-egui = { version = "0.34", default-features = false }
+egui = { version = "*", default-features = false }
 ```
 
 ### 2. Add a build.rs
@@ -153,7 +153,6 @@ The version check uses raw C ABI (no Rust ABI involved) so it works even across 
 
 Plugins are unloaded automatically when:
 
-- The user clicks "卸载所有插件"
 - The `LoadedPlugin` is dropped (e.g. `plugins.clear()`)
 
 Immediately before the plugin is destroyed:

@@ -18,7 +18,7 @@ use crate::utils::plugins::LoadedPlugin;
 /// Magic header for canvas files: `b"UWU"` followed by format version byte.
 /// Must be kept in sync with [`CANVAS_FILE_HEADER`].
 pub(crate) const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
-pub(crate) const CANVAS_FILE_VERSION: u8 = 3;
+pub(crate) const CANVAS_FILE_VERSION: u8 = 4;
 pub(crate) const CANVAS_FILE_EXT: &str = "owo"; // open whiteboard objects
 
 pub(crate) fn make_canvas_file_header() -> [u8; 4] {
@@ -85,6 +85,7 @@ impl StrokeWidth {
         }
     }
 
+    #[allow(unused)]
     pub fn len(&self) -> Option<usize> {
         match self {
             StrokeWidth::Fixed(_) => None,
@@ -130,7 +131,7 @@ pub enum TransformHandle {
 /// Available tools for canvas interaction
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum CanvasTool {
-    Passthrough, // Only available in passthrough mode; passes clicks through to underlying windows
+    Passthrough, // Only available in overlay mode; passes clicks through to underlying windows
     Select,      // Select and manipulate objects
     #[default]
     Brush, // Draw freehand strokes
@@ -765,6 +766,9 @@ pub struct PersistentState {
     pub click_or_drag_to_single_select: bool,
 
     #[serde(default)]
+    pub disable_edge_gestures: bool,
+
+    #[serde(default)]
     pub plugin_paths: Vec<PathBuf>,
 }
 
@@ -796,6 +800,7 @@ impl Default for PersistentState {
             show_startup_animation: true,
 
             easter_egg_redo: false,
+            disable_edge_gestures: false,
             plugin_paths: Vec::new(),
         }
     }
@@ -1153,6 +1158,7 @@ impl History {
     }
 
     // 保存移动对象的命令
+    #[allow(unused)]
     pub fn save_move_object(
         &mut self,
         index: usize,
@@ -1377,6 +1383,7 @@ pub struct AppState {
     pub pages: Vec<PageState>,                           // 分页
     pub current_page: usize,                             // 当前页码
     pub pointers: HashMap<u64, PointerState>, // 统一指针状态表 (鼠标 id=0, 触控使用 winit touch id)
+    pub egui_window_rects: Vec<egui::Rect>,   // 保存所有 egui 窗口的 Rect，用于触控 Hittest
     pub brush_color: Color32,                 // 画笔颜色
     pub brush_width: f32,                     // 画笔大小
     pub dynamic_brush_width_mode: DynamicBrushWidthMode, // 动态画笔大小微调
@@ -1427,6 +1434,8 @@ pub struct AppState {
 
     /// Loaded plugins.
     pub plugins: Vec<LoadedPlugin>,
+
+    pub initial_file: Option<PathBuf>,
 }
 
 impl Default for AppState {
@@ -1437,6 +1446,7 @@ impl Default for AppState {
             pages: vec![default_page.clone()],
             current_page: 0,
             pointers: HashMap::new(),
+            egui_window_rects: Vec::new(),
             brush_color: Color32::WHITE,
             brush_width: 3.0,
             dynamic_brush_width_mode: DynamicBrushWidthMode::default(),
@@ -1477,6 +1487,7 @@ impl Default for AppState {
                 x: 0.0_f64,
                 y: 0.0_f64,
             },
+            initial_file: None,
         }
     }
 }
@@ -1576,5 +1587,60 @@ impl AppState {
         } else {
             self.selected_object_indices.push(index);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_dummy_object() -> CanvasObject {
+        CanvasObject::Shape(CanvasShape {
+            shape_type: CanvasShapeType::Circle,
+            pos: Pos2::new(0.0, 0.0),
+            size: 10.0,
+            color: Color32::WHITE,
+        })
+    }
+
+    #[test]
+    fn test_history_undo_redo() {
+        let mut history = History::new(10);
+        let mut state = CanvasState::default();
+
+        let obj = create_dummy_object();
+
+        // Add object
+        state.objects.push(obj.clone());
+        history.save_add_object(0, obj.clone());
+
+        assert_eq!(state.objects.len(), 1);
+        assert_eq!(history.undo_stack.len(), 1);
+        assert_eq!(history.redo_stack.len(), 0);
+
+        // Undo
+        let undo_success = history.undo(&mut state);
+        assert!(undo_success);
+        assert_eq!(state.objects.len(), 0);
+        assert_eq!(history.undo_stack.len(), 0);
+        assert_eq!(history.redo_stack.len(), 1);
+
+        // Redo
+        let redo_success = history.redo(&mut state);
+        assert!(redo_success);
+        assert_eq!(state.objects.len(), 1);
+        assert_eq!(history.undo_stack.len(), 1);
+        assert_eq!(history.redo_stack.len(), 0);
+    }
+
+    #[test]
+    fn test_history_limit() {
+        let mut history = History::new(2);
+
+        for i in 0..5 {
+            history.save_add_object(i, create_dummy_object());
+        }
+
+        assert_eq!(history.undo_stack.len(), 2);
     }
 }

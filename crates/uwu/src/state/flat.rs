@@ -1,14 +1,13 @@
-use rkyv::{Archive, Deserialize, Serialize};
+use bitcode::{Decode, Encode};
 
 use super::{
     CanvasImage, CanvasObject, CanvasShape, CanvasShapeType, CanvasState, CanvasStroke, CanvasText,
     Color32, History, HistoryCommand, ObjectTransform, PageState, Pos2, StrokeWidth,
 };
 
-// ===== Flat data types for rkyv serialization =====
+// ===== Flat data types for bitcode serialization =====
 
-#[derive(rkyv::Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct PageStateFlat {
     pub canvas: CanvasStateFlat,
     pub history: HistoryFlat,
@@ -16,14 +15,12 @@ pub struct PageStateFlat {
     pub view_zoom: f32,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct CanvasStateFlat {
     pub objects: Vec<CanvasObjectFlat>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum CanvasObjectFlat {
     Stroke(StrokeFlat),
     Text(TextFlat),
@@ -31,8 +28,7 @@ pub enum CanvasObjectFlat {
     Image(ImageFlat),
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct StrokeFlat {
     pub points: Vec<[f32; 2]>,
     pub width: StrokeWidthFlat,
@@ -40,15 +36,13 @@ pub struct StrokeFlat {
     pub base_width: f32,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum StrokeWidthFlat {
     Fixed(f32),
     Dynamic(Vec<f32>),
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct TextFlat {
     pub text: String,
     pub pos: [f32; 2],
@@ -56,8 +50,7 @@ pub struct TextFlat {
     pub font_size: f32,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct ShapeFlat {
     pub shape_type: ShapeTypeFlat,
     pub pos: [f32; 2],
@@ -65,8 +58,7 @@ pub struct ShapeFlat {
     pub color: [u8; 4],
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum ShapeTypeFlat {
     Line,
     Arrow,
@@ -75,8 +67,7 @@ pub enum ShapeTypeFlat {
     Circle,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct ImageFlat {
     pub pos: [f32; 2],
     pub size: [f32; 2],
@@ -85,15 +76,13 @@ pub struct ImageFlat {
     pub image_size: [u32; 2],
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct HistoryFlat {
     pub undo_stack: Vec<HistoryCommandFlat>,
     pub redo_stack: Vec<HistoryCommandFlat>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum HistoryCommandFlat {
     AddObject {
         index: u32,
@@ -118,8 +107,7 @@ pub enum HistoryCommandFlat {
     },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
-#[rkyv(bytecheck())]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct ObjectTransformFlat {
     pub pos: [f32; 2],
     pub size: [f32; 2],
@@ -169,62 +157,57 @@ fn canvas_object_to_flat(obj: &CanvasObject) -> Option<CanvasObjectFlat> {
     }
 }
 
-fn archived_object_to_canvas_object(
-    obj: &ArchivedCanvasObjectFlat,
-    ctx: &egui::Context,
-) -> CanvasObject {
+fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> CanvasObject {
     match obj {
-        ArchivedCanvasObjectFlat::Stroke(s) => CanvasObject::Stroke(CanvasStroke {
+        CanvasObjectFlat::Stroke(s) => CanvasObject::Stroke(CanvasStroke {
             points: s
                 .points
-                .iter()
-                .map(|p| Pos2::new(p[0].into(), p[1].into()))
+                .into_iter()
+                .map(|p| Pos2::new(p[0], p[1]))
                 .collect(),
-            width: match &s.width {
-                ArchivedStrokeWidthFlat::Fixed(w) => StrokeWidth::Fixed((*w).into()),
-                ArchivedStrokeWidthFlat::Dynamic(v) => {
-                    StrokeWidth::Dynamic(v.iter().map(|&x| x.into()).collect())
-                }
+            width: match s.width {
+                StrokeWidthFlat::Fixed(w) => StrokeWidth::Fixed(w),
+                StrokeWidthFlat::Dynamic(v) => StrokeWidth::Dynamic(v),
             },
             color: Color32::from_rgba_unmultiplied(s.color[0], s.color[1], s.color[2], s.color[3]),
-            base_width: s.base_width.into(),
+            base_width: s.base_width,
             shape: None,
         }),
-        ArchivedCanvasObjectFlat::Text(t) => CanvasObject::Text(CanvasText {
-            text: t.text.as_str().to_string(),
-            pos: Pos2::new(t.pos[0].into(), t.pos[1].into()),
+        CanvasObjectFlat::Text(t) => CanvasObject::Text(CanvasText {
+            text: t.text,
+            pos: Pos2::new(t.pos[0], t.pos[1]),
             color: Color32::from_rgba_unmultiplied(t.color[0], t.color[1], t.color[2], t.color[3]),
-            font_size: t.font_size.into(),
+            font_size: t.font_size,
             cached_size: None,
         }),
-        ArchivedCanvasObjectFlat::Shape(s) => CanvasObject::Shape(CanvasShape {
+        CanvasObjectFlat::Shape(s) => CanvasObject::Shape(CanvasShape {
             shape_type: match s.shape_type {
-                ArchivedShapeTypeFlat::Line => CanvasShapeType::Line,
-                ArchivedShapeTypeFlat::Arrow => CanvasShapeType::Arrow,
-                ArchivedShapeTypeFlat::Rectangle => CanvasShapeType::Rectangle,
-                ArchivedShapeTypeFlat::Triangle => CanvasShapeType::Triangle,
-                ArchivedShapeTypeFlat::Circle => CanvasShapeType::Circle,
+                ShapeTypeFlat::Line => CanvasShapeType::Line,
+                ShapeTypeFlat::Arrow => CanvasShapeType::Arrow,
+                ShapeTypeFlat::Rectangle => CanvasShapeType::Rectangle,
+                ShapeTypeFlat::Triangle => CanvasShapeType::Triangle,
+                ShapeTypeFlat::Circle => CanvasShapeType::Circle,
             },
-            pos: Pos2::new(s.pos[0].into(), s.pos[1].into()),
-            size: s.size.into(),
+            pos: Pos2::new(s.pos[0], s.pos[1]),
+            size: s.size,
             color: Color32::from_rgba_unmultiplied(s.color[0], s.color[1], s.color[2], s.color[3]),
         }),
-        ArchivedCanvasObjectFlat::Image(img) => {
-            let width = u32::from(img.image_size[0]) as usize;
-            let height = u32::from(img.image_size[1]) as usize;
-            let rgba_data: Vec<u8> = img.image_data.iter().copied().collect();
+        CanvasObjectFlat::Image(img) => {
+            let width = img.image_size[0] as usize;
+            let height = img.image_size[1] as usize;
+            let rgba_data = img.image_data;
             let color_image = egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba_data);
             let texture =
                 ctx.load_texture("loaded_image", color_image, egui::TextureOptions::LINEAR);
             let image_data: std::sync::Arc<[u8]> = rgba_data.into();
             CanvasObject::Image(CanvasImage {
                 texture,
-                pos: Pos2::new(img.pos[0].into(), img.pos[1].into()),
-                size: egui::Vec2::new(img.size[0].into(), img.size[1].into()),
-                aspect_ratio: img.aspect_ratio.into(),
+                pos: Pos2::new(img.pos[0], img.pos[1]),
+                size: egui::Vec2::new(img.size[0], img.size[1]),
+                aspect_ratio: img.aspect_ratio,
                 marked_for_deletion: false,
                 image_data,
-                image_size: [u32::from(img.image_size[0]), u32::from(img.image_size[1])],
+                image_size: img.image_size,
             })
         }
     }
@@ -325,10 +308,10 @@ impl From<&PageState> for PageStateFlat {
     }
 }
 
-// ===== Conversions: flat (archived) → runtime =====
+// ===== Conversions: flat → runtime =====
 
 impl PageState {
-    /// Loads a PageState from an rkyv-archived file, using the egui context
+    /// Loads a PageState from a file, using the egui context
     /// to create GPU textures for any deserialized images.
     pub fn load_from_file(
         path: &std::path::PathBuf,
@@ -354,42 +337,39 @@ impl PageState {
         }
 
         let payload = &bytes[HEADER_SIZE..];
-        let archived = rkyv::access::<ArchivedPageStateFlat, rkyv::rancor::Error>(payload)
-            .map_err(|e| format!("rkyv error: {e}"))?;
+        let flat =
+            bitcode::decode::<PageStateFlat>(payload).map_err(|e| format!("bitcode error: {e}"))?;
 
-        Ok(Self::from_archived(archived, ctx))
+        Ok(Self::from_flat(flat, ctx))
     }
 
-    fn from_archived(archived: &ArchivedPageStateFlat, ctx: &egui::Context) -> Self {
+    fn from_flat(flat: PageStateFlat, ctx: &egui::Context) -> Self {
         PageState {
             canvas: CanvasState {
-                objects: archived
+                objects: flat
                     .canvas
                     .objects
-                    .iter()
-                    .map(|obj| archived_object_to_canvas_object(obj, ctx))
+                    .into_iter()
+                    .map(|obj| object_to_canvas_object(obj, ctx))
                     .collect(),
             },
             history: History {
-                undo_stack: archived
+                undo_stack: flat
                     .history
                     .undo_stack
-                    .iter()
-                    .map(|cmd| archived_history_command_to_runtime(cmd, ctx))
+                    .into_iter()
+                    .map(|cmd| history_command_to_runtime(cmd, ctx))
                     .collect(),
-                redo_stack: archived
+                redo_stack: flat
                     .history
                     .redo_stack
-                    .iter()
-                    .map(|cmd| archived_history_command_to_runtime(cmd, ctx))
+                    .into_iter()
+                    .map(|cmd| history_command_to_runtime(cmd, ctx))
                     .collect(),
                 max_history_size: 50,
             },
-            view_offset: egui::Vec2::new(
-                archived.view_offset[0].into(),
-                archived.view_offset[1].into(),
-            ),
-            view_zoom: archived.view_zoom.into(),
+            view_offset: egui::Vec2::new(flat.view_offset[0], flat.view_offset[1]),
+            view_zoom: flat.view_zoom,
         }
     }
 
@@ -407,14 +387,13 @@ impl PageState {
         Self::load_from_file(&path, ctx)
     }
 
-    /// Saves the page state to a file using rkyv binary format.
+    /// Saves the page state to a file using bitcode binary format.
     pub fn save_to_file(
         &self,
         path: &std::path::PathBuf,
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let flat = PageStateFlat::from(self);
-        let payload =
-            rkyv::to_bytes::<rkyv::rancor::Error>(&flat).map_err(|e| format!("rkyv error: {e}"))?;
+        let payload = bitcode::encode(&flat);
 
         let header = super::make_canvas_file_header();
         const HEADER_SIZE: usize = 4;
@@ -441,50 +420,95 @@ impl PageState {
     }
 }
 
-fn archived_history_command_to_runtime(
-    cmd: &ArchivedHistoryCommandFlat,
-    ctx: &egui::Context,
-) -> HistoryCommand {
+fn history_command_to_runtime(cmd: HistoryCommandFlat, ctx: &egui::Context) -> HistoryCommand {
     match cmd {
-        ArchivedHistoryCommandFlat::AddObject { index, object } => HistoryCommand::AddObject {
-            index: u32::from(*index) as usize,
-            object: archived_object_to_canvas_object(object, ctx),
+        HistoryCommandFlat::AddObject { index, object } => HistoryCommand::AddObject {
+            index: index as usize,
+            object: object_to_canvas_object(object, ctx),
         },
-        ArchivedHistoryCommandFlat::RemoveObject { index, object } => {
-            HistoryCommand::RemoveObject {
-                index: u32::from(*index) as usize,
-                object: archived_object_to_canvas_object(object, ctx),
-            }
-        }
-        ArchivedHistoryCommandFlat::ClearObjects { objects } => HistoryCommand::ClearObjects {
+        HistoryCommandFlat::RemoveObject { index, object } => HistoryCommand::RemoveObject {
+            index: index as usize,
+            object: object_to_canvas_object(object, ctx),
+        },
+        HistoryCommandFlat::ClearObjects { objects } => HistoryCommand::ClearObjects {
             objects: objects
-                .iter()
-                .map(|obj| archived_object_to_canvas_object(obj, ctx))
+                .into_iter()
+                .map(|obj| object_to_canvas_object(obj, ctx))
                 .collect(),
         },
-        ArchivedHistoryCommandFlat::MoveObject {
+        HistoryCommandFlat::MoveObject {
             index,
             old_position,
             new_position,
         } => HistoryCommand::MoveObject {
-            index: u32::from(*index) as usize,
-            old_position: egui::Vec2::new(old_position[0].into(), old_position[1].into()),
-            new_position: egui::Vec2::new(new_position[0].into(), new_position[1].into()),
+            index: index as usize,
+            old_position: egui::Vec2::new(old_position[0], old_position[1]),
+            new_position: egui::Vec2::new(new_position[0], new_position[1]),
         },
-        ArchivedHistoryCommandFlat::TransformObject {
+        HistoryCommandFlat::TransformObject {
             index,
             old_transform,
             new_transform,
         } => HistoryCommand::TransformObject {
-            index: u32::from(*index) as usize,
+            index: index as usize,
             old_transform: ObjectTransform {
-                pos: Pos2::new(old_transform.pos[0].into(), old_transform.pos[1].into()),
-                size: egui::Vec2::new(old_transform.size[0].into(), old_transform.size[1].into()),
+                pos: Pos2::new(old_transform.pos[0], old_transform.pos[1]),
+                size: egui::Vec2::new(old_transform.size[0], old_transform.size[1]),
             },
             new_transform: ObjectTransform {
-                pos: Pos2::new(new_transform.pos[0].into(), new_transform.pos[1].into()),
-                size: egui::Vec2::new(new_transform.size[0].into(), new_transform.size[1].into()),
+                pos: Pos2::new(new_transform.pos[0], new_transform.pos[1]),
+                size: egui::Vec2::new(new_transform.size[0], new_transform.size[1]),
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{CanvasShape, CanvasShapeType};
+    use egui::{Color32, Pos2};
+
+    #[test]
+    fn test_canvas_object_to_flat_shape() {
+        let shape = CanvasObject::Shape(CanvasShape {
+            shape_type: CanvasShapeType::Circle,
+            pos: Pos2::new(10.0, 20.0),
+            size: 5.0,
+            color: Color32::from_rgba_unmultiplied(255, 0, 0, 255),
+        });
+
+        let flat = canvas_object_to_flat(&shape).expect("Failed to convert to flat");
+
+        if let CanvasObjectFlat::Shape(flat_shape) = flat {
+            assert!(matches!(flat_shape.shape_type, ShapeTypeFlat::Circle));
+            assert_eq!(flat_shape.pos, [10.0, 20.0]);
+            assert_eq!(flat_shape.size, 5.0);
+            assert_eq!(flat_shape.color, [255, 0, 0, 255]);
+        } else {
+            panic!("Expected ShapeFlat");
+        }
+    }
+
+    #[test]
+    fn test_canvas_object_to_flat_text() {
+        let text = CanvasObject::Text(crate::state::CanvasText {
+            text: "Hello".to_string(),
+            pos: Pos2::new(1.0, 2.0),
+            color: Color32::from_rgba_unmultiplied(0, 255, 0, 255),
+            font_size: 14.0,
+            cached_size: None,
+        });
+
+        let flat = canvas_object_to_flat(&text).expect("Failed to convert to flat");
+
+        if let CanvasObjectFlat::Text(flat_text) = flat {
+            assert_eq!(flat_text.text, "Hello");
+            assert_eq!(flat_text.pos, [1.0, 2.0]);
+            assert_eq!(flat_text.font_size, 14.0);
+            assert_eq!(flat_text.color, [0, 255, 0, 255]);
+        } else {
+            panic!("Expected TextFlat");
+        }
     }
 }

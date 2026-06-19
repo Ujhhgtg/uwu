@@ -16,7 +16,7 @@ use crate::{
         PersistentState, PointerInteraction, PointerState, StrokeWidth, ThemeMode, WindowMode,
     },
     utils::{
-        self,
+        self, export,
         stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start},
         ui::{
             PageAction, UiExt, add_new_page_state, apply_theme_mode_and_canvas_color,
@@ -30,7 +30,7 @@ pub fn ui_welcome(state: &mut AppState, ctx: &Context) {
     let content_rect = ctx.content_rect();
     let center_pos = content_rect.center();
 
-    egui::Window::new("欢迎")
+    let res = egui::Window::new("欢迎")
         .resizable(false)
         .collapsible(false)
         .movable(false)
@@ -71,6 +71,9 @@ pub fn ui_welcome(state: &mut AppState, ctx: &Context) {
                 "启动时显示欢迎",
             );
         });
+    if let Some(r) = res {
+        state.egui_window_rects.push(r.response.rect);
+    }
 }
 
 fn collapsing(ui: &mut Ui, section_id: &str, label: &str, add_body: impl FnOnce(&mut Ui)) {
@@ -242,16 +245,99 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             }
         });
 
+        ui.horizontal(|ui| {
+            ui.my_label("画布文件关联:");
+            if ui.button("安装").clicked() {
+                match utils::associations::install_associations() {
+                    Ok(_) => {
+                        state.toasts.success("文件关联安装成功!");
+                    }
+                    Err(e) => {
+                        state.toasts.error(format!("文件关联安装失败: {}", e));
+                    }
+                }
+            }
+            if ui.button("卸载").clicked() {
+                match utils::associations::uninstall_associations() {
+                    Ok(_) => {
+                        state.toasts.success("文件关联卸载成功!");
+                    }
+                    Err(e) => {
+                        state.toasts.error(format!("文件关联卸载失败: {}", e));
+                    }
+                }
+            }
+            let is_installed = utils::associations::is_associations_installed();
+            if is_installed {
+                ui.label(
+                    egui::RichText::new("✓ 已安装").color(egui::Color32::from_rgb(40, 200, 40)),
+                );
+            } else {
+                ui.label(
+                    egui::RichText::new("X 未安装").color(egui::Color32::from_rgb(220, 50, 50)),
+                );
+            }
+        });
+
         if !state.is_overlay_mode {
             ui.horizontal(|ui| {
-                ui.my_label("画布转换:");
-                if ui.button("导出为图片").clicked()
+                ui.my_label("画布导出:");
+                if ui.button("单页导出为位图").clicked()
                     && let Some(path) = rfd::FileDialog::new()
-                        .add_filter("画布文件", IMAGE_FILE_EXTS)
-                        .set_file_name("canvas.bmp")
+                        .add_filter("位图", IMAGE_FILE_EXTS)
+                        .set_file_name("canvas_page.bmp")
                         .save_file()
                 {
                     state.screenshot_path = Some(path);
+                }
+
+                if ui.button("单页导出为 SVG").clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .add_filter("SVG 矢量图", &["svg"])
+                        .set_file_name("canvas_page.svg")
+                        .save_file()
+                {
+                    match export::export_page_to_svg(
+                        &state.canvas,
+                        state.persistent.canvas_color,
+                        &path,
+                    ) {
+                        Ok(_) => {
+                            state.toasts.success("画布导出成功!");
+                        }
+                        Err(err) => {
+                            state.toasts.error(format!("画布导出失败: {}", err));
+                        }
+                    }
+                }
+
+                if ui.button("所有页导出为 PDF").clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .add_filter("PDF 文档", &["pdf"])
+                        .set_file_name("canvas.pdf")
+                        .save_file()
+                {
+                    let mut pages_canvas = Vec::new();
+                    for i in 0..state.pages.len() {
+                        if i == state.current_page {
+                            pages_canvas.push(&state.canvas);
+                        } else {
+                            pages_canvas.push(&state.pages[i].canvas);
+                        }
+                    }
+
+                    match export::export_all_pages_to_pdf(
+                        &pages_canvas,
+                        state.persistent.canvas_color,
+                        &path,
+                    ) {
+                        Ok(_) => {
+                            state.toasts.success("画布导出成功!");
+                        }
+                        Err(err) => {
+                            state.toasts.error(format!("画布导出失败: {}", err));
+                        }
+                    }
                 }
             });
         }
@@ -303,6 +389,31 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         ui.horizontal(|ui| {
             ui.my_label("低延迟模式:");
             ui.checkbox(&mut state.persistent.low_latency_mode, "");
+        });
+
+        #[cfg(windows)]
+        ui.horizontal(|ui| {
+            ui.my_label("禁用系统边缘手势:");
+            let resp = ui.checkbox(&mut state.persistent.disable_edge_gestures, "");
+            if resp.changed() {
+                let is_fullscreen = matches!(
+                    state.persistent.window_mode,
+                    WindowMode::ExclusiveFullscreen | WindowMode::BorderlessFullscreen
+                );
+                if is_fullscreen {
+                    let hwnd = utils::windows::winit_window_to_hwnd(window);
+                    if let Some(hwnd) = hwnd {
+                        if utils::windows::is_windows_10_or_greater() {
+                            unsafe {
+                                let _ = utils::windows::disable_edge_gestures(
+                                    hwnd,
+                                    state.persistent.disable_edge_gestures,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         });
 
         ui.horizontal(|ui| {
@@ -717,7 +828,6 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         ui.my_label(format!("作者: {}", env!("CARGO_PKG_AUTHORS")));
     });
 }
-
 pub fn ui_history(state: &mut AppState, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.my_label("历史记录:");
@@ -966,7 +1076,7 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
     let center_pos = content_rect.center();
     let total_pages = state.pages.len();
 
-    egui::Window::new(format!("页面管理 (共 {} 页)", total_pages))
+    let res = egui::Window::new(format!("页面管理 (共 {} 页)", total_pages))
         .id("page_man".into())
         .resizable(false)
         .collapsible(false)
@@ -1152,6 +1262,9 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
                 clear_interaction_state(state);
             }
         });
+    if let Some(r) = res {
+        state.egui_window_rects.push(r.response.rect);
+    }
 }
 
 fn ui_toolbar_tools_content(
@@ -1695,37 +1808,51 @@ fn ui_toolbar_tools_selector(state: &mut AppState, ui: &mut Ui) {
     });
 }
 
-pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) {
+pub fn ui_toolbar(
+    state: &mut AppState,
+    ctx: &Context,
+    window: &Arc<Window>,
+    is_helper: bool,
+) -> Option<egui::Rect> {
     let content_rect = ctx.content_rect();
-    egui::Window::new("工具栏")
+    let mut w = egui::Window::new("工具栏")
         .resizable(false)
         .collapsible(false)
-        .movable(true)
-        .pivot(egui::Align2::CENTER_BOTTOM)
-        .default_pos([content_rect.center().x, content_rect.max.y - 20.0])
         .enabled(!state.show_welcome_window)
-        .title_bar(false)
-        .show(ctx, |ui| {
-            ui_toolbar_tools_content(state, ctx, ui, window);
+        .title_bar(false);
 
-            let show_sep = !matches!(
-                state.current_tool,
-                CanvasTool::Brush | CanvasTool::ObjectEraser | CanvasTool::PixelEraser
-            ) || state.toolbar_expanded;
-            if show_sep {
-                ui.separator();
-            }
+    if is_helper {
+        w = w.movable(false).constrain(false).fixed_pos([10.0, 10.0]);
+    } else {
+        w = w
+            .movable(true)
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .default_pos([content_rect.center().x, content_rect.max.y - 20.0]);
+    }
 
-            ui_toolbar_tools_selector(state, ui);
+    let inner_response = w.show(ctx, |ui| {
+        ui_toolbar_tools_content(state, ctx, ui, window);
 
+        let show_sep = !matches!(
+            state.current_tool,
+            CanvasTool::Brush | CanvasTool::ObjectEraser | CanvasTool::PixelEraser
+        ) || state.toolbar_expanded;
+        if show_sep {
             ui.separator();
+        }
 
-            ui_history(state, ui);
+        ui_toolbar_tools_selector(state, ui);
 
-            ui.separator();
+        ui.separator();
 
-            ui_window_controls(state, ui, window);
-        });
+        ui_history(state, ui);
+
+        ui.separator();
+
+        ui_window_controls(state, ui, window);
+    });
+
+    inner_response.map(|ir| ir.response.rect)
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -2700,71 +2827,3 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 }
 
 const IMAGE_FILE_EXTS: &[&str; 6] = &["png", "jpg", "jpeg", "bmp", "webp", "ico"];
-
-/// Renders the passthrough helper window UI with a full toolbar.
-/// Tool selector buttons are functional (switches tool & closes helper).
-/// Returns `true` when a tool is clicked, signaling that the helper should close.
-pub fn ui_passthrough_helper(state: &mut AppState, ctx: &Context) -> bool {
-    let mut close = false;
-    egui::Window::new("##passthrough_helper_window")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .movable(false)
-        .fixed_rect(ctx.content_rect())
-        .show(ctx, |ui| {
-            if state.current_tool == CanvasTool::Passthrough {
-                ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
-            }
-
-            ui.separator();
-
-            // Tool selector - functional (switch tool + close helper)
-            ui.horizontal(|ui| {
-                ui.my_label("工具:");
-                let old_tool = state.current_tool;
-                if ((state.is_overlay_mode
-                    && ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Passthrough, "穿透")
-                        .changed())
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Select, "选择")
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::View, "视图")
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Brush, "画笔")
-                        .changed()
-                    || ui
-                        .selectable_value(
-                            &mut state.current_tool,
-                            CanvasTool::ObjectEraser,
-                            "对象擦",
-                        )
-                        .changed()
-                    || ui
-                        .selectable_value(
-                            &mut state.current_tool,
-                            CanvasTool::PixelEraser,
-                            "像素擦",
-                        )
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Insert, "插入")
-                        .changed()
-                    || ui
-                        .selectable_value(&mut state.current_tool, CanvasTool::Settings, "设置")
-                        .changed())
-                    && state.current_tool != old_tool
-                {
-                    clear_interaction_state(state);
-                    if state.is_overlay_mode {
-                        state.command_queue.push(AppCommand::UpdateCursorHittest);
-                    }
-                    close = true;
-                }
-            });
-        });
-    close
-}

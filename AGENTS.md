@@ -25,16 +25,12 @@ cargo clippy --release
 cargo fmt
 ```
 
-## Code Navigation
-
-Use the LSP for code navigation/search whenever possible — it's more precise than text search for finding definitions, references, symbol locations, and call hierarchies.
-
 ## Architecture
 
 - GUI app using **egui + wgpu + winit**
 - Entrypoint: `src/main.rs`
 - States: `src/state/mod.rs`
-- rkyv serialization states: `src/state/flat.rs`
+- bitcode serialization states: `src/state/flat.rs`
 - Rendering: `src/render.rs`
 - App logic: `src/app.rs`
 - Utilities: `src/utils/*.rs`

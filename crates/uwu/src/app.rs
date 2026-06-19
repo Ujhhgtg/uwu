@@ -1,14 +1,14 @@
 use crate::assets::ICON;
-use crate::passthrough_helper::PassthroughHelper;
+use crate::overlay_toolbar::OverlayToolbar;
 use crate::render::RenderState;
-use crate::single_instance;
 use crate::state::{
     AppCommand, AppState, CanvasObject, CanvasObjectOps, CanvasTool, HistoryCommand, InsertTab,
-    MarqueeMatchMode, PointerInteraction, PointerState,
+    MarqueeMatchMode, PageState, PointerInteraction, PointerState,
 };
 use crate::ui;
 use crate::utils;
 use crate::utils::plugins::{PluginAlreadyLoaded, load_plugin_from_path};
+use crate::utils::single_instance;
 use crate::utils::stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start};
 use crate::utils::ui::{apply_theme_mode_and_canvas_color, apply_window_mode};
 use core::f32;
@@ -32,7 +32,7 @@ pub struct App {
     pub render_state: Option<RenderState>,
     pub window: Option<Arc<Window>>,
     pub state: AppState,
-    pub helper_window: Option<PassthroughHelper>,
+    pub toolbar_window: Option<OverlayToolbar>,
 }
 
 impl App {
@@ -68,7 +68,7 @@ impl App {
             render_state: None,
             window: None,
             state,
-            helper_window: None,
+            toolbar_window: None,
         }
     }
 
@@ -134,6 +134,20 @@ error: failed to enable premultiplied alpha for window: {:?}
                     err
                 );
             }
+
+            let is_fullscreen = matches!(
+                self.state.persistent.window_mode,
+                crate::state::WindowMode::ExclusiveFullscreen
+                    | crate::state::WindowMode::BorderlessFullscreen
+            );
+            if is_fullscreen
+                && self.state.persistent.disable_edge_gestures
+                && utils::windows::is_windows_10_or_greater()
+            {
+                if let Some(hwnd) = utils::windows::winit_window_to_hwnd(&window) {
+                    let _ = utils::windows::disable_edge_gestures(hwnd, true);
+                }
+            }
         };
 
         // prepare renderer
@@ -167,6 +181,24 @@ error: failed to enable premultiplied alpha for window: {:?}
             self.state.persistent.theme_mode,
             self.state.persistent.canvas_color,
         );
+
+        if let Some(initial_file) = self.state.initial_file.take() {
+            match PageState::load_from_file(&initial_file, ctx) {
+                Ok(page) => {
+                    self.state.canvas = page.canvas.clone();
+                    self.state.history = page.history.clone();
+                    self.state.view_offset = page.view_offset;
+                    self.state.view_zoom = page.view_zoom;
+                    self.state.pages = vec![page];
+                    self.state.current_page = 0;
+                    self.state.show_welcome_window = false;
+                    self.state.toasts.success("成功加载画布!");
+                }
+                Err(err) => {
+                    self.state.toasts.error(format!("画布加载失败: {}!", err));
+                }
+            }
+        }
 
         // first draw
         window.request_redraw();
@@ -275,6 +307,7 @@ error: failed to enable premultiplied alpha for window: {:?}
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         render_state.egui_renderer.begin_frame(window);
+        self.state.egui_window_rects.clear();
 
         // access this value in next redraw before ui to ensure that all ui has become invisible
         let screenshot_path = self.state.screenshot_path.clone();
@@ -304,9 +337,16 @@ error: failed to enable premultiplied alpha for window: {:?}
                     ui::ui_welcome(&mut self.state, ctx);
                 }
 
-                ui::ui_toolbar(&mut self.state, ctx, window);
+                if !self.state.is_overlay_mode
+                    && let Some(rect) = ui::ui_toolbar(&mut self.state, ctx, window, false)
+                {
+                    self.state.egui_window_rects.push(rect);
+                }
 
-                ui::ui_pages_nav(&mut self.state, ctx);
+                if let Some((win1, win2)) = ui::ui_pages_nav(&mut self.state, ctx) {
+                    self.state.egui_window_rects.push(win1);
+                    self.state.egui_window_rects.push(win2);
+                }
 
                 if self.state.show_page_management_window {
                     ui::ui_pages_manager(&mut self.state, ctx);
@@ -474,7 +514,51 @@ impl ApplicationHandler<()> for App {
             window.focus_window();
         }
 
-        self.request_helper_repaint_if_needed();
+        let mut paths_to_open = Vec::new();
+        if let Ok(mut lock) = single_instance::FILES_TO_OPEN.lock() {
+            if !lock.is_empty() {
+                paths_to_open = std::mem::take(&mut *lock);
+            }
+        }
+
+        if !paths_to_open.is_empty() {
+            let ctx = self
+                .render_state
+                .as_ref()
+                .unwrap()
+                .egui_renderer
+                .context()
+                .clone();
+            for path in paths_to_open {
+                match PageState::load_from_file(&path, &ctx) {
+                    Ok(page) => {
+                        let old = self.state.current_page;
+                        self.state.pages[old].canvas = std::mem::take(&mut self.state.canvas);
+                        self.state.pages[old].history = std::mem::take(&mut self.state.history);
+                        self.state.pages[old].view_offset = self.state.view_offset;
+                        self.state.pages[old].view_zoom = self.state.view_zoom;
+
+                        self.state.pages.push(page.clone());
+                        let new_idx = self.state.pages.len() - 1;
+                        self.state.current_page = new_idx;
+                        self.state.canvas = page.canvas;
+                        self.state.history = page.history;
+                        self.state.view_offset = page.view_offset;
+                        self.state.view_zoom = page.view_zoom;
+                        self.state.show_welcome_window = false;
+
+                        utils::ui::clear_interaction_state(&mut self.state);
+                        self.state.toasts.success("成功加载画布!");
+                    }
+                    Err(err) => {
+                        self.state.toasts.error(format!("画布加载失败: {}!", err));
+                    }
+                }
+            }
+            self.window.as_ref().unwrap().request_redraw();
+        }
+
+        self.request_toolbar_repaint_if_needed();
 
         // redraw if egui requests repaint
         if self
@@ -496,7 +580,7 @@ impl ApplicationHandler<()> for App {
         event: WindowEvent,
     ) {
         // Dispatch to helper window if this event is for it
-        if self.is_event_for_helper(window_id) {
+        if self.is_event_for_toolbar(window_id) {
             self.handle_helper_window_event(event_loop, event);
             return;
         }
@@ -542,7 +626,7 @@ impl ApplicationHandler<()> for App {
             }
             WindowEvent::RedrawRequested => {
                 self.handle_redraw();
-                self.manage_passthrough_helper(event_loop);
+                self.manage_overlay_toolbar(event_loop);
             }
             WindowEvent::Resized(new_size) if new_size.width > 0 && new_size.height > 0 => {
                 self.handle_resized(new_size.width, new_size.height);
@@ -562,6 +646,17 @@ impl ApplicationHandler<()> for App {
                     location.y as f32 / scale_factor,
                 );
                 let pos = screen_pos / self.state.view_zoom + self.state.view_offset;
+
+                if phase == TouchPhase::Started {
+                    let hit_ui = self
+                        .state
+                        .egui_window_rects
+                        .iter()
+                        .any(|rect| rect.contains(screen_pos));
+                    if hit_ui {
+                        return;
+                    }
+                }
 
                 match phase {
                     TouchPhase::Started => match self.state.current_tool {
