@@ -36,6 +36,7 @@ wgpu = { version = "29", default-features = false, features = [
 # ui utils
 egui-notify = "0.22"
 image = { version = "0.25", default-features = false, features = [
+    "bmp",
     "ico",
     "jpeg",
     "png",
