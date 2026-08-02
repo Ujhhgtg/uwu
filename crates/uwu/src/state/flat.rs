@@ -15,6 +15,36 @@ pub struct PageStateFlat {
     pub view_zoom: f32,
 }
 
+impl PageStateFlat {
+    /// Validates structural invariants that runtime code relies on. Corrupt or
+    /// hand-crafted files are rejected here instead of panicking later during
+    /// painting or texture upload.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.view_offset[0].is_finite()
+            || !self.view_offset[1].is_finite()
+            || !self.view_zoom.is_finite()
+            || self.view_zoom <= 0.0
+        {
+            return Err("view state contains non-finite or invalid values".into());
+        }
+
+        for (index, object) in self.canvas.objects.iter().enumerate() {
+            validate_object(object).map_err(|e| format!("object {index}: {e}"))?;
+        }
+
+        for (index, command) in self.history.undo_stack.iter().enumerate() {
+            validate_history_command(command)
+                .map_err(|e| format!("undo history command {index}: {e}"))?;
+        }
+        for (index, command) in self.history.redo_stack.iter().enumerate() {
+            validate_history_command(command)
+                .map_err(|e| format!("redo history command {index}: {e}"))?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct CanvasStateFlat {
     pub objects: Vec<CanvasObjectFlat>,
@@ -231,6 +261,129 @@ fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> Canvas
     }
 }
 
+fn validate_object(obj: &CanvasObjectFlat) -> Result<(), String> {
+    let finite_pos = |p: &[f32; 2]| p[0].is_finite() && p[1].is_finite();
+
+    match obj {
+        CanvasObjectFlat::Stroke(s) => {
+            if s.points.is_empty() {
+                return Err("stroke has no points".into());
+            }
+            if !s.points.iter().all(finite_pos) {
+                return Err("stroke contains non-finite points".into());
+            }
+            match &s.width {
+                StrokeWidthFlat::Fixed(w) => {
+                    if !w.is_finite() || *w < 0.0 {
+                        return Err("stroke has an invalid fixed width".into());
+                    }
+                }
+                StrokeWidthFlat::Dynamic(widths) => {
+                    if widths.is_empty() {
+                        return Err("stroke has an empty dynamic width list".into());
+                    }
+                    if widths.len() != s.points.len() {
+                        return Err(format!(
+                            "stroke dynamic width count {} does not match point count {}",
+                            widths.len(),
+                            s.points.len()
+                        ));
+                    }
+                    if !widths.iter().all(|w| w.is_finite() && *w >= 0.0) {
+                        return Err("stroke contains invalid dynamic widths".into());
+                    }
+                }
+            }
+            if !s.base_width.is_finite() || s.base_width < 0.0 {
+                return Err("stroke has an invalid base width".into());
+            }
+        }
+        CanvasObjectFlat::Text(t) => {
+            if !finite_pos(&t.pos) || !t.font_size.is_finite() || t.font_size <= 0.0 {
+                return Err("text has invalid position or font size".into());
+            }
+        }
+        CanvasObjectFlat::Shape(s) => {
+            if !finite_pos(&s.pos) || !s.size.is_finite() || s.size < 0.0 {
+                return Err("shape has invalid position or size".into());
+            }
+        }
+        CanvasObjectFlat::Image(img) => {
+            let [width, height] = img.image_size;
+            let expected = (width as usize)
+                .checked_mul(height as usize)
+                .and_then(|n| n.checked_mul(4));
+            if width == 0 || height == 0 {
+                return Err("image has a zero dimension".into());
+            }
+            if expected != Some(img.image_data.len()) {
+                return Err(format!(
+                    "image data length {} does not match dimensions {width}x{height}",
+                    img.image_data.len()
+                ));
+            }
+            if !finite_pos(&img.pos)
+                || !img.size[0].is_finite()
+                || !img.size[1].is_finite()
+                || img.size[0] <= 0.0
+                || img.size[1] <= 0.0
+            {
+                return Err("image has invalid position or size".into());
+            }
+            if !img.aspect_ratio.is_finite() || img.aspect_ratio <= 0.0 {
+                return Err("image has an invalid aspect ratio".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_history_command(command: &HistoryCommandFlat) -> Result<(), String> {
+    let finite_pos = |p: &[f32; 2]| p[0].is_finite() && p[1].is_finite();
+    let finite_transform = |t: &ObjectTransformFlat| {
+        finite_pos(&t.pos) && t.size[0].is_finite() && t.size[1].is_finite()
+    };
+
+    match command {
+        HistoryCommandFlat::AddObject { object, .. }
+        | HistoryCommandFlat::RemoveObject { object, .. } => validate_object(object),
+        HistoryCommandFlat::ClearObjects { objects } => {
+            for (index, object) in objects.iter().enumerate() {
+                validate_object(object).map_err(|e| format!("clear object {index}: {e}"))?;
+            }
+            Ok(())
+        }
+        HistoryCommandFlat::MoveObject {
+            old_position,
+            new_position,
+            ..
+        } => {
+            if !finite_pos(old_position) || !finite_pos(new_position) {
+                Err("move command contains non-finite positions".into())
+            } else {
+                Ok(())
+            }
+        }
+        HistoryCommandFlat::TransformObject {
+            old_transform,
+            new_transform,
+            ..
+        } => {
+            if !finite_transform(old_transform) || !finite_transform(new_transform) {
+                Err("transform command contains non-finite values".into())
+            } else {
+                Ok(())
+            }
+        }
+        HistoryCommandFlat::ReplaceObjects { old, new } => {
+            for (index, object) in old.iter().chain(new).enumerate() {
+                validate_object(object).map_err(|e| format!("replaced object {index}: {e}"))?;
+            }
+            Ok(())
+        }
+    }
+}
+
 // ===== Conversions: runtime → flat =====
 
 impl From<&CanvasState> for CanvasStateFlat {
@@ -371,6 +524,9 @@ impl PageState {
         let payload = &bytes[HEADER_SIZE..];
         let flat =
             bitcode::decode::<PageStateFlat>(payload).map_err(|e| format!("bitcode error: {e}"))?;
+
+        flat.validate()
+            .map_err(|e| format!("invalid canvas file: {e}"))?;
 
         Ok(Self::from_flat(flat, ctx))
     }
@@ -711,5 +867,68 @@ mod tests {
         ));
         assert_eq!(loaded.view_offset, egui::Vec2::new(1.0, 2.0));
         assert_eq!(loaded.view_zoom, 1.5);
+    }
+
+    fn make_valid_flat() -> PageStateFlat {
+        PageStateFlat {
+            canvas: CanvasStateFlat {
+                objects: vec![CanvasObjectFlat::Stroke(StrokeFlat {
+                    points: vec![[0.0, 0.0], [1.0, 1.0]],
+                    width: StrokeWidthFlat::Fixed(3.0),
+                    color: [255, 255, 255, 255],
+                    base_width: 3.0,
+                    shape: None,
+                })],
+            },
+            history: HistoryFlat {
+                undo_stack: Vec::new(),
+                redo_stack: Vec::new(),
+            },
+            view_offset: [0.0, 0.0],
+            view_zoom: 1.0,
+        }
+    }
+
+    #[test]
+    fn test_validate_rejects_empty_stroke_points() {
+        let mut flat = make_valid_flat();
+        if let CanvasObjectFlat::Stroke(stroke) = &mut flat.canvas.objects[0] {
+            stroke.points.clear();
+        }
+        assert!(flat.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_dynamic_width_mismatch() {
+        let mut flat = make_valid_flat();
+        if let CanvasObjectFlat::Stroke(stroke) = &mut flat.canvas.objects[0] {
+            stroke.width = StrokeWidthFlat::Dynamic(vec![1.0]);
+        }
+        assert!(flat.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_bad_image_data_size() {
+        let mut flat = make_valid_flat();
+        flat.canvas.objects[0] = CanvasObjectFlat::Image(ImageFlat {
+            pos: [0.0, 0.0],
+            size: [10.0, 10.0],
+            aspect_ratio: 1.0,
+            image_data: vec![0u8; 3], // 1x1 RGBA needs 4 bytes
+            image_size: [1, 1],
+        });
+        assert!(flat.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_non_finite_zoom() {
+        let mut flat = make_valid_flat();
+        flat.view_zoom = f32::NAN;
+        assert!(flat.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_flat() {
+        assert!(make_valid_flat().validate().is_ok());
     }
 }
