@@ -2533,7 +2533,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                     pos,
                                     prev_pos: None,
                                     interaction: PointerInteraction::Erasing {
-                                        original_objects: Vec::new(),
+                                        original_objects: state.canvas.objects.clone(),
                                         modified: false,
                                     },
                                 },
@@ -2546,10 +2546,10 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         {
                             pointer.pos = pos;
                         }
-                    } else {
-                        state.pointers.remove(&0);
+                        } else {
+                            state.finish_erasing(0);
+                        }
                     }
-                }
 
                 // Interpolate between the previous and current pointer position
                 // so a fast swipe does not skip objects between frames.
@@ -2614,8 +2614,14 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         // are removed; clear it so no wrong object is targeted.
                         state.clear_selection();
                         for i in to_remove {
-                            let object = state.canvas.objects.remove(i);
-                            state.history.save_remove_object(i, object);
+                            state.canvas.objects.remove(i);
+                        }
+                        for pointer in state.pointers.values_mut() {
+                            if let PointerInteraction::Erasing { modified, .. } =
+                                &mut pointer.interaction
+                            {
+                                *modified = true;
+                            }
                         }
                     }
                 }
@@ -2653,7 +2659,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             pointer.pos = pos;
                         }
                     } else {
-                        state.finish_pixel_erasing(0);
+                        state.finish_erasing(0);
                     }
                 }
 
@@ -2697,30 +2703,27 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         egui::vec2(state.eraser_size, state.eraser_size),
                     );
 
-                    let mut new_strokes = Vec::new();
-                    let mut strokes_modified = false;
+                    // Index of each touched stroke -> its replacement pieces
+                    // (empty means the whole stroke was erased).
+                    let mut replacements: std::collections::HashMap<usize, Vec<CanvasStroke>> =
+                        std::collections::HashMap::new();
 
-                    for object in &state.canvas.objects {
+                    for (index, object) in state.canvas.objects.iter().enumerate() {
                         if let CanvasObject::Stroke(stroke) = object {
                             if stroke.points.len() < 2 {
                                 let single_point = stroke.points[0];
                                 let dist = pos.distance(single_point);
-                                if dist > eraser_radius + stroke.width.first() / 2.0 {
-                                    new_strokes.push(stroke.clone());
-                                } else {
+                                if dist <= eraser_radius + stroke.width.first() / 2.0 {
                                     // Only mark the gesture as modified when the
                                     // single-point stroke is actually erased.
-                                    strokes_modified = true;
+                                    replacements.insert(index, Vec::new());
                                 }
                                 continue;
                             }
 
                             if !stroke.bounding_box().intersects(eraser_rect) {
-                                new_strokes.push(stroke.clone());
                                 continue;
                             }
-
-                            strokes_modified = true;
 
                             // Interpolate shape strokes for finer eraser granularity
                             let (points, widths) = if stroke.shape.is_some() {
@@ -2756,6 +2759,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                 (stroke.points.clone(), stroke.width.clone())
                             };
 
+                            let mut new_strokes = Vec::new();
                             let mut current_points = Vec::new();
                             let mut current_widths = Vec::new();
 
@@ -2798,23 +2802,27 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                     cached_bbox: std::cell::Cell::new(None),
                                 });
                             }
+
+                            replacements.insert(index, new_strokes);
                         }
                     }
 
-                    if strokes_modified {
+                    if !replacements.is_empty() {
                         any_modified = true;
-                        let non_strokes: Vec<_> = state
-                            .canvas
-                            .objects
-                            .iter()
-                            .filter(|obj| !matches!(obj, CanvasObject::Stroke(_)))
-                            .cloned()
-                            .collect();
-                        state.canvas.objects = non_strokes;
-
-                        for stroke in new_strokes {
-                            state.canvas.objects.push(CanvasObject::Stroke(stroke));
+                        // Rebuild by moving (not cloning) untouched objects; only
+                        // touched strokes are replaced by their split pieces,
+                        // preserving the original z-order.
+                        let objects = std::mem::take(&mut state.canvas.objects);
+                        let mut result = Vec::with_capacity(objects.len() + 16);
+                        for (index, object) in objects.into_iter().enumerate() {
+                            match replacements.remove(&index) {
+                                Some(pieces) => {
+                                    result.extend(pieces.into_iter().map(CanvasObject::Stroke));
+                                }
+                                None => result.push(object),
+                            }
                         }
+                        state.canvas.objects = result;
                     }
                 }
 

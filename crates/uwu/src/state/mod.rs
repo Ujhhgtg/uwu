@@ -1719,9 +1719,9 @@ impl AppState {
         self.selected_object_indices.clear();
     }
 
-    /// Ends a pixel-eraser gesture: removes the pointer and records a single
+    /// Ends an eraser gesture: removes the pointer and records a single
     /// history command covering every change made since the gesture started.
-    pub fn finish_pixel_erasing(&mut self, pointer_id: u64) {
+    pub fn finish_erasing(&mut self, pointer_id: u64) {
         let Some(pointer) = self.pointers.remove(&pointer_id) else {
             return;
         };
@@ -1930,7 +1930,7 @@ mod tests {
         // Simulate the eraser shrinking the object list during the gesture.
         state.canvas.objects.pop();
 
-        state.finish_pixel_erasing(42);
+        state.finish_erasing(42);
 
         // Exactly one command, covering the whole gesture.
         assert_eq!(state.history.undo_stack.len(), 1);

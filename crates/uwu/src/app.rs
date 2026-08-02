@@ -1005,11 +1005,8 @@ impl ApplicationHandler<()> for App {
                                 }
                             }
                         }
-                        CanvasTool::ObjectEraser => {
-                            self.state.pointers.remove(&id);
-                        }
-                        CanvasTool::PixelEraser => {
-                            self.state.finish_pixel_erasing(id);
+                        CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
+                            self.state.finish_erasing(id);
                         }
                         CanvasTool::Insert => {
                             if let Some(pointer) = self.state.pointers.remove(&id)
