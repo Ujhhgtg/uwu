@@ -34,42 +34,42 @@ wgpu = { version = "29", default-features = false, features = [
 ] }
 
 # ui utils
-egui-notify = "*"
-image = { version = "*", default-features = false, features = [
+egui-notify = "0.22"
+image = { version = "0.25", default-features = false, features = [
     "ico",
     "jpeg",
     "png",
     "webp",
     "rayon",
 ] }
-ttf-parser = "*"
-rfd = "*"
+ttf-parser = "0.25"
+rfd = "0.17"
 printpdf = { version = "0.9", features = ["images"] }
 
 
 # serialization
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 bitcode = "0.6"
 
 # utils
-pollster = "*"
-dirs = "*"
-interprocess = "*"
-libloading = "*"
+dirs = "6"
+interprocess = "2"
+libloading = "0.8"
+pollster = "0.4"
 plugin_api = { path = "../plugin_api" }
 
 # features dependencies
-fontdb = { version = "*", optional = true }
-profiling = { version = "*", optional = true, features = [
+fontdb = { version = "0.23", optional = true }
+profiling = { version = "1", optional = true, features = [
     "profile-with-puffin",
 ] }
-puffin = { version = "*", optional = true }
-puffin_egui = { version = "*", optional = true }
-mimalloc = { version = "*", optional = true }
+puffin = { version = "0.20", optional = true }
+puffin_egui = { version = "0.30", optional = true }
+mimalloc = { version = "0.1", optional = true }
 
 [build-dependencies]
-winres = "*"
+winres = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = { version = "0.22", default-features = false }
@@ -80,12 +80,12 @@ winit = { version = "0.30", default-features = false, features = ["wayland"] }
 egui-wgpu = { version = "0.34", features = ["wayland"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "*", features = [
+windows = { version = "0.62", features = [
     "Win32_System_Console",
     "Win32_System_Com",
     "Win32_Foundation",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows-core = { version = "*", default-features = false }
-winreg = "*"
+windows-core = { version = "0.62", default-features = false }
+winreg = "0.56"
