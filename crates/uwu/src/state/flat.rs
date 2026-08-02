@@ -34,6 +34,7 @@ pub struct StrokeFlat {
     pub width: StrokeWidthFlat,
     pub color: [u8; 4],
     pub base_width: f32,
+    pub shape: Option<ShapeTypeFlat>,
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
@@ -105,6 +106,10 @@ pub enum HistoryCommandFlat {
         old_transform: ObjectTransformFlat,
         new_transform: ObjectTransformFlat,
     },
+    ReplaceObjects {
+        old: Vec<CanvasObjectFlat>,
+        new: Vec<CanvasObjectFlat>,
+    },
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
@@ -115,9 +120,9 @@ pub struct ObjectTransformFlat {
 
 // ===== Helper: convert individual CanvasObject ↔ CanvasObjectFlat =====
 
-fn canvas_object_to_flat(obj: &CanvasObject) -> Option<CanvasObjectFlat> {
+fn canvas_object_to_flat(obj: &CanvasObject) -> CanvasObjectFlat {
     match obj {
-        CanvasObject::Stroke(s) => Some(CanvasObjectFlat::Stroke(StrokeFlat {
+        CanvasObject::Stroke(s) => CanvasObjectFlat::Stroke(StrokeFlat {
             points: s.points.iter().map(|p| [p.x, p.y]).collect(),
             width: match &s.width {
                 StrokeWidth::Fixed(w) => StrokeWidthFlat::Fixed(*w),
@@ -125,14 +130,21 @@ fn canvas_object_to_flat(obj: &CanvasObject) -> Option<CanvasObjectFlat> {
             },
             color: [s.color.r(), s.color.g(), s.color.b(), s.color.a()],
             base_width: s.base_width,
-        })),
-        CanvasObject::Text(t) => Some(CanvasObjectFlat::Text(TextFlat {
+            shape: s.shape.map(|shape_type| match shape_type {
+                CanvasShapeType::Line => ShapeTypeFlat::Line,
+                CanvasShapeType::Arrow => ShapeTypeFlat::Arrow,
+                CanvasShapeType::Rectangle => ShapeTypeFlat::Rectangle,
+                CanvasShapeType::Triangle => ShapeTypeFlat::Triangle,
+                CanvasShapeType::Circle => ShapeTypeFlat::Circle,
+            }),
+        }),
+        CanvasObject::Text(t) => CanvasObjectFlat::Text(TextFlat {
             text: t.text.clone(),
             pos: [t.pos.x, t.pos.y],
             color: [t.color.r(), t.color.g(), t.color.b(), t.color.a()],
             font_size: t.font_size,
-        })),
-        CanvasObject::Shape(s) => Some(CanvasObjectFlat::Shape(ShapeFlat {
+        }),
+        CanvasObject::Shape(s) => CanvasObjectFlat::Shape(ShapeFlat {
             shape_type: match s.shape_type {
                 CanvasShapeType::Line => ShapeTypeFlat::Line,
                 CanvasShapeType::Arrow => ShapeTypeFlat::Arrow,
@@ -143,16 +155,16 @@ fn canvas_object_to_flat(obj: &CanvasObject) -> Option<CanvasObjectFlat> {
             pos: [s.pos.x, s.pos.y],
             size: s.size,
             color: [s.color.r(), s.color.g(), s.color.b(), s.color.a()],
-        })),
+        }),
         CanvasObject::Image(img) => {
             let data: Vec<u8> = img.image_data.to_vec();
-            Some(CanvasObjectFlat::Image(ImageFlat {
+            CanvasObjectFlat::Image(ImageFlat {
                 pos: [img.pos.x, img.pos.y],
                 size: [img.size.x, img.size.y],
                 aspect_ratio: img.aspect_ratio,
                 image_data: data,
                 image_size: img.image_size,
-            }))
+            })
         }
     }
 }
@@ -171,7 +183,13 @@ fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> Canvas
             },
             color: Color32::from_rgba_unmultiplied(s.color[0], s.color[1], s.color[2], s.color[3]),
             base_width: s.base_width,
-            shape: None,
+            shape: s.shape.map(|shape_type| match shape_type {
+                ShapeTypeFlat::Line => CanvasShapeType::Line,
+                ShapeTypeFlat::Arrow => CanvasShapeType::Arrow,
+                ShapeTypeFlat::Rectangle => CanvasShapeType::Rectangle,
+                ShapeTypeFlat::Triangle => CanvasShapeType::Triangle,
+                ShapeTypeFlat::Circle => CanvasShapeType::Circle,
+            }),
         }),
         CanvasObjectFlat::Text(t) => CanvasObject::Text(CanvasText {
             text: t.text,
@@ -218,11 +236,7 @@ fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> Canvas
 impl From<&CanvasState> for CanvasStateFlat {
     fn from(state: &CanvasState) -> Self {
         CanvasStateFlat {
-            objects: state
-                .objects
-                .iter()
-                .filter_map(canvas_object_to_flat)
-                .collect(),
+            objects: state.objects.iter().map(canvas_object_to_flat).collect(),
         }
     }
 }
@@ -236,64 +250,80 @@ impl From<&ObjectTransform> for ObjectTransformFlat {
     }
 }
 
-fn history_command_to_flat(cmd: &HistoryCommand) -> Option<HistoryCommandFlat> {
+fn history_command_to_flat(cmd: &HistoryCommand) -> HistoryCommandFlat {
     match cmd {
-        HistoryCommand::AddObject { index, object } => {
-            canvas_object_to_flat(object).map(|obj| HistoryCommandFlat::AddObject {
-                index: *index as u32,
-                object: obj,
-            })
-        }
-        HistoryCommand::RemoveObject { index, object } => {
-            canvas_object_to_flat(object).map(|obj| HistoryCommandFlat::RemoveObject {
-                index: *index as u32,
-                object: obj,
-            })
-        }
-        HistoryCommand::ClearObjects { objects } => {
-            let flat_objects: Vec<CanvasObjectFlat> =
-                objects.iter().filter_map(canvas_object_to_flat).collect();
-            Some(HistoryCommandFlat::ClearObjects {
-                objects: flat_objects,
-            })
-        }
+        HistoryCommand::AddObject { index, object } => HistoryCommandFlat::AddObject {
+            index: *index as u32,
+            object: canvas_object_to_flat(object),
+        },
+        HistoryCommand::RemoveObject { index, object } => HistoryCommandFlat::RemoveObject {
+            index: *index as u32,
+            object: canvas_object_to_flat(object),
+        },
+        HistoryCommand::ClearObjects { objects } => HistoryCommandFlat::ClearObjects {
+            objects: objects.iter().map(canvas_object_to_flat).collect(),
+        },
         HistoryCommand::MoveObject {
             index,
             old_position,
             new_position,
-        } => Some(HistoryCommandFlat::MoveObject {
+        } => HistoryCommandFlat::MoveObject {
             index: *index as u32,
             old_position: [old_position.x, old_position.y],
             new_position: [new_position.x, new_position.y],
-        }),
+        },
         HistoryCommand::TransformObject {
             index,
             old_transform,
             new_transform,
-        } => Some(HistoryCommandFlat::TransformObject {
+        } => HistoryCommandFlat::TransformObject {
             index: *index as u32,
             old_transform: ObjectTransformFlat::from(old_transform),
             new_transform: ObjectTransformFlat::from(new_transform),
-        }),
-        // FIXME: batch commands are ignored
-        HistoryCommand::BatchCommand { .. } => None,
-        // FIXME: replaced in a later commit with a proper flat variant
-        HistoryCommand::ReplaceObjects { .. } => None,
+        },
+        HistoryCommand::ReplaceObjects { old, new } => HistoryCommandFlat::ReplaceObjects {
+            old: old.iter().map(canvas_object_to_flat).collect(),
+            new: new.iter().map(canvas_object_to_flat).collect(),
+        },
+        // BatchCommand cannot be represented in the flat format: bitcode's
+        // derive does not support recursive types. Expansion happens in
+        // `From<&History> for HistoryFlat`; reaching this arm means a batch
+        // was converted directly, which must not happen.
+        HistoryCommand::BatchCommand { .. } => {
+            unreachable!("BatchCommand must be flattened before conversion")
+        }
     }
 }
 
 impl From<&History> for HistoryFlat {
     fn from(history: &History) -> Self {
+        // Batch commands expand to their inner commands. For the undo stack the
+        // inner order is kept (undo pops in reverse), while for the redo stack
+        // the inner order is reversed (redo pops the last entry first).
+        fn flatten(cmd: &HistoryCommand, for_redo: bool) -> Vec<HistoryCommandFlat> {
+            match cmd {
+                HistoryCommand::BatchCommand { commands } => {
+                    let mut inner: Vec<HistoryCommandFlat> =
+                        commands.iter().flat_map(|c| flatten(c, for_redo)).collect();
+                    if for_redo {
+                        inner.reverse();
+                    }
+                    inner
+                }
+                other => vec![history_command_to_flat(other)],
+            }
+        }
+
         HistoryFlat {
             undo_stack: history
                 .undo_stack
                 .iter()
-                .filter_map(history_command_to_flat)
+                .flat_map(|cmd| flatten(cmd, false))
                 .collect(),
             redo_stack: history
                 .redo_stack
                 .iter()
-                .filter_map(history_command_to_flat)
+                .flat_map(|cmd| flatten(cmd, true))
                 .collect(),
         }
     }
@@ -462,6 +492,16 @@ fn history_command_to_runtime(cmd: HistoryCommandFlat, ctx: &egui::Context) -> H
                 size: egui::Vec2::new(new_transform.size[0], new_transform.size[1]),
             },
         },
+        HistoryCommandFlat::ReplaceObjects { old, new } => HistoryCommand::ReplaceObjects {
+            old: old
+                .into_iter()
+                .map(|obj| object_to_canvas_object(obj, ctx))
+                .collect(),
+            new: new
+                .into_iter()
+                .map(|obj| object_to_canvas_object(obj, ctx))
+                .collect(),
+        },
     }
 }
 
@@ -480,7 +520,7 @@ mod tests {
             color: Color32::from_rgba_unmultiplied(255, 0, 0, 255),
         });
 
-        let flat = canvas_object_to_flat(&shape).expect("Failed to convert to flat");
+        let flat = canvas_object_to_flat(&shape);
 
         if let CanvasObjectFlat::Shape(flat_shape) = flat {
             assert!(matches!(flat_shape.shape_type, ShapeTypeFlat::Circle));
@@ -502,7 +542,7 @@ mod tests {
             cached_size: None,
         });
 
-        let flat = canvas_object_to_flat(&text).expect("Failed to convert to flat");
+        let flat = canvas_object_to_flat(&text);
 
         if let CanvasObjectFlat::Text(flat_text) = flat {
             assert_eq!(flat_text.text, "Hello");
@@ -512,5 +552,164 @@ mod tests {
         } else {
             panic!("Expected TextFlat");
         }
+    }
+
+    #[test]
+    fn test_stroke_shape_round_trip() {
+        let stroke = CanvasObject::Stroke(CanvasStroke {
+            points: vec![Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0)],
+            width: StrokeWidth::Fixed(3.0),
+            color: Color32::WHITE,
+            base_width: 3.0,
+            shape: Some(CanvasShapeType::Rectangle),
+        });
+
+        let flat = canvas_object_to_flat(&stroke);
+        let ctx = egui::Context::default();
+        let back = object_to_canvas_object(flat, &ctx);
+
+        if let CanvasObject::Stroke(restored) = back {
+            assert_eq!(restored.shape, Some(CanvasShapeType::Rectangle));
+        } else {
+            panic!("Expected Stroke");
+        }
+    }
+
+    #[test]
+    fn test_batch_and_replace_history_round_trip() {
+        let obj = |shape_type| {
+            CanvasObject::Shape(CanvasShape {
+                shape_type,
+                pos: Pos2::new(0.0, 0.0),
+                size: 10.0,
+                color: Color32::WHITE,
+            })
+        };
+        let history = History {
+            undo_stack: vec![
+                HistoryCommand::BatchCommand {
+                    commands: vec![
+                        HistoryCommand::RemoveObject {
+                            index: 2,
+                            object: obj(CanvasShapeType::Circle),
+                        },
+                        HistoryCommand::AddObject {
+                            index: 3,
+                            object: obj(CanvasShapeType::Triangle),
+                        },
+                    ],
+                },
+                HistoryCommand::ReplaceObjects {
+                    old: vec![obj(CanvasShapeType::Line)],
+                    new: vec![obj(CanvasShapeType::Arrow), obj(CanvasShapeType::Circle)],
+                },
+            ],
+            redo_stack: vec![HistoryCommand::BatchCommand {
+                commands: vec![
+                    HistoryCommand::RemoveObject {
+                        index: 2,
+                        object: obj(CanvasShapeType::Circle),
+                    },
+                    HistoryCommand::AddObject {
+                        index: 3,
+                        object: obj(CanvasShapeType::Triangle),
+                    },
+                ],
+            }],
+            max_history_size: 50,
+        };
+
+        let flat = HistoryFlat::from(&history);
+        let bytes = bitcode::encode(&flat);
+        let decoded: HistoryFlat = bitcode::decode(&bytes).unwrap();
+        let ctx = egui::Context::default();
+        let back = History {
+            undo_stack: decoded
+                .undo_stack
+                .into_iter()
+                .map(|cmd| history_command_to_runtime(cmd, &ctx))
+                .collect(),
+            redo_stack: decoded
+                .redo_stack
+                .into_iter()
+                .map(|cmd| history_command_to_runtime(cmd, &ctx))
+                .collect(),
+            max_history_size: 50,
+        };
+
+        // The batch on the undo stack expands in inner order: RemoveObject
+        // first (undo pops it last), then AddObject and the ReplaceObjects
+        // command that was pushed after the batch.
+        assert_eq!(back.undo_stack.len(), 3);
+        assert!(matches!(
+            back.undo_stack[0],
+            HistoryCommand::RemoveObject { index: 2, .. }
+        ));
+        assert!(matches!(
+            back.undo_stack[1],
+            HistoryCommand::AddObject { index: 3, .. }
+        ));
+        assert!(matches!(
+            back.undo_stack[2],
+            HistoryCommand::ReplaceObjects { .. }
+        ));
+
+        // The batch on the redo stack expands in reversed inner order so that
+        // popping the stack applies RemoveObject before AddObject again.
+        assert_eq!(back.redo_stack.len(), 2);
+        assert!(matches!(
+            back.redo_stack[0],
+            HistoryCommand::AddObject { index: 3, .. }
+        ));
+        assert!(matches!(
+            back.redo_stack[1],
+            HistoryCommand::RemoveObject { index: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn test_page_state_save_load_round_trip() {
+        let ctx = egui::Context::default();
+        let stroke = CanvasObject::Stroke(CanvasStroke {
+            points: vec![Pos2::new(0.0, 0.0), Pos2::new(10.0, 0.0)],
+            width: StrokeWidth::Fixed(3.0),
+            color: Color32::WHITE,
+            base_width: 3.0,
+            shape: Some(CanvasShapeType::Rectangle),
+        });
+        let page = PageState {
+            canvas: CanvasState {
+                objects: vec![stroke],
+            },
+            history: History {
+                undo_stack: vec![HistoryCommand::ReplaceObjects {
+                    old: Vec::new(),
+                    new: Vec::new(),
+                }],
+                redo_stack: Vec::new(),
+                max_history_size: 50,
+            },
+            view_offset: egui::Vec2::new(1.0, 2.0),
+            view_zoom: 1.5,
+        };
+
+        let path = std::env::temp_dir().join(format!("uwu_flat_test_{}.owo", std::process::id()));
+        page.save_to_file(&path).unwrap();
+        let loaded = PageState::load_from_file(&path, &ctx).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.canvas.objects.len(), 1);
+        if let CanvasObject::Stroke(stroke) = &loaded.canvas.objects[0] {
+            assert_eq!(stroke.shape, Some(CanvasShapeType::Rectangle));
+        } else {
+            panic!("Expected Stroke");
+        }
+        assert_eq!(loaded.history.undo_stack.len(), 1);
+        assert!(matches!(
+            loaded.history.undo_stack[0],
+            HistoryCommand::ReplaceObjects { .. }
+        ));
+        assert_eq!(loaded.view_offset, egui::Vec2::new(1.0, 2.0));
+        assert_eq!(loaded.view_zoom, 1.5);
     }
 }

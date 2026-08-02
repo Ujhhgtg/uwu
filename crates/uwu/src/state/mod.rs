@@ -18,7 +18,7 @@ use crate::utils::plugins::LoadedPlugin;
 /// Magic header for canvas files: `b"UWU"` followed by format version byte.
 /// Must be kept in sync with [`CANVAS_FILE_HEADER`].
 pub(crate) const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
-pub(crate) const CANVAS_FILE_VERSION: u8 = 4;
+pub(crate) const CANVAS_FILE_VERSION: u8 = 5;
 pub(crate) const CANVAS_FILE_EXT: &str = "owo"; // open whiteboard objects
 
 pub(crate) fn make_canvas_file_header() -> [u8; 4] {
