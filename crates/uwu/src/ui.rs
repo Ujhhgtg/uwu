@@ -2719,8 +2719,11 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                 let dist = pos.distance(single_point);
                                 if dist > eraser_radius + stroke.width.first() / 2.0 {
                                     new_strokes.push(stroke.clone());
+                                } else {
+                                    // Only mark the gesture as modified when the
+                                    // single-point stroke is actually erased.
+                                    strokes_modified = true;
                                 }
-                                strokes_modified = true;
                                 continue;
                             }
 
