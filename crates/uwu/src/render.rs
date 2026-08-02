@@ -16,7 +16,6 @@ pub struct RenderState {
     pub queue: wgpu::Queue,
     pub surface_config: wgpu::SurfaceConfiguration,
     pub surface: wgpu::Surface<'static>,
-    pub scale_factor: f32,
     pub egui_renderer: EguiRenderer,
 }
 
@@ -71,16 +70,7 @@ impl RenderState {
 
         surface.configure(&device, &surface_config);
 
-        const SCALE_FACTOR: f32 = 1.0; // TODO: modifying this to non-1.0 values breaks most stuff
-
-        let egui_renderer = EguiRenderer::new(
-            &device,
-            surface_config.format,
-            None,
-            1,
-            window,
-            SCALE_FACTOR,
-        );
+        let egui_renderer = EguiRenderer::new(&device, surface_config.format, None, 1, window);
 
         Self {
             device,
@@ -88,7 +78,6 @@ impl RenderState {
             surface,
             surface_config,
             egui_renderer,
-            scale_factor: SCALE_FACTOR,
         }
     }
 
@@ -108,7 +97,6 @@ pub struct EguiRenderer {
     state: State,
     renderer: Renderer,
     frame_started: bool,
-    pixels_per_point: f32,
 }
 
 impl EguiRenderer {
@@ -122,12 +110,16 @@ impl EguiRenderer {
         output_depth_format: Option<TextureFormat>,
         msaa_samples: u32,
         window: &Window,
-        pixels_per_point: f32,
     ) -> EguiRenderer {
         let mut egui_context = Context::default();
 
         utils::ui::setup_fonts(&mut egui_context);
 
+        // `pixels_per_point` is derived from the window's native scale factor
+        // every frame (see `egui_winit::State::take_egui_input`), so we must not
+        // override it here. Forcing 1.0 made egui lay out in physical-pixel
+        // coordinates while the renderer still scaled by `scale_factor`,
+        // breaking HiDPI (blurry text, wrong hit-testing, inconsistent zoom).
         let egui_state = egui_winit::State::new(
             egui_context.clone(),
             egui::viewport::ViewportId::ROOT,
@@ -146,7 +138,6 @@ impl EguiRenderer {
                 predictable_texture_filtering: false,
             },
         );
-        egui_context.set_pixels_per_point(pixels_per_point);
         egui_context.memory_mut(|memory| {
             memory.options.tessellation_options.prerasterized_discs = true;
             memory.options.tessellation_options.parallel_tessellation = true;
@@ -157,7 +148,6 @@ impl EguiRenderer {
             state: egui_state,
             renderer: egui_renderer,
             frame_started: false,
-            pixels_per_point,
         }
     }
 
@@ -196,7 +186,7 @@ impl EguiRenderer {
             profiling::scope!("egui::tessellate");
             self.state
                 .egui_ctx()
-                .tessellate(full_output.shapes, self.pixels_per_point)
+                .tessellate(full_output.shapes, full_output.pixels_per_point)
         };
         {
             #[cfg(feature = "profiling")]

@@ -111,7 +111,6 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
             None,
             1,
             &window,
-            window.scale_factor() as f32,
         );
 
         let ctx = egui_renderer.context().clone();
@@ -200,12 +199,12 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        toolbar.egui_renderer.begin_frame(&toolbar.window);
+
         let screen_descriptor = ScreenDescriptor {
             size_in_pixels: [toolbar.surface_config.width, toolbar.surface_config.height],
-            pixels_per_point: toolbar.window.scale_factor() as f32,
+            pixels_per_point: toolbar.egui_renderer.context().pixels_per_point(),
         };
-
-        toolbar.egui_renderer.begin_frame(&toolbar.window);
 
         let ctx = toolbar.egui_renderer.context().clone();
 

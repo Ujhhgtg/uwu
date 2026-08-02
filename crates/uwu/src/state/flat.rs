@@ -247,12 +247,8 @@ fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> Canvas
             let rgba_data = img.image_data;
             // Keep the original pixels for export/save; only the GPU texture is
             // downscaled for display.
-            let texture = crate::utils::create_display_texture(
-                ctx,
-                &rgba_data,
-                width as u32,
-                height as u32,
-            );
+            let texture =
+                crate::utils::create_display_texture(ctx, &rgba_data, width as u32, height as u32);
             let image_data: std::sync::Arc<[u8]> = rgba_data.into();
             CanvasObject::Image(CanvasImage {
                 texture,

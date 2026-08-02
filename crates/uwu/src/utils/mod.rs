@@ -300,10 +300,8 @@ pub fn create_display_texture(
         (rgba.to_vec(), width, height)
     };
 
-    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-        [tex_w as usize, tex_h as usize],
-        &tex_data,
-    );
+    let color_image =
+        egui::ColorImage::from_rgba_unmultiplied([tex_w as usize, tex_h as usize], &tex_data);
     ctx.load_texture("canvas_image", color_image, egui::TextureOptions::LINEAR)
 }
 
@@ -881,14 +879,8 @@ mod tests {
         assert_eq!(width.first(), 5.0);
 
         // Without a pressure source the stroke keeps the fixed base width.
-        let width = calculate_dynamic_width(
-            10.0,
-            DynamicBrushWidthMode::PressureBased,
-            0,
-            1,
-            None,
-            None,
-        );
+        let width =
+            calculate_dynamic_width(10.0, DynamicBrushWidthMode::PressureBased, 0, 1, None, None);
         assert!(matches!(width, StrokeWidth::Fixed(w) if w == 10.0));
     }
 }

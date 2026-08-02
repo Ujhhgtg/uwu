@@ -2551,10 +2551,10 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         {
                             pointer.pos = pos;
                         }
-                        } else {
-                            state.finish_erasing(0);
-                        }
+                    } else {
+                        state.finish_erasing(0);
                     }
+                }
 
                 // Interpolate between the previous and current pointer position
                 // so a fast swipe does not skip objects between frames.

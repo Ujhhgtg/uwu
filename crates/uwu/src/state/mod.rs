@@ -37,8 +37,8 @@ pub const EXIT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(3);
 pub enum DynamicBrushWidthMode {
     #[default]
     Disabled, // No dynamic width adjustment
-    BrushTip,   // Simulates brush tip pressure for calligraphy effect
-    SpeedBased, // Adjusts width based on drawing speed
+    BrushTip,      // Simulates brush tip pressure for calligraphy effect
+    SpeedBased,    // Adjusts width based on drawing speed
     PressureBased, // Maps stylus/touch pressure to stroke width
 }
 
@@ -852,10 +852,7 @@ impl PersistentState {
 
     /// Shows a system dialog when the settings file cannot be read or parsed,
     /// letting the user reset it, open it with the default application, or exit.
-    fn handle_load_failure(
-        settings_path: &std::path::Path,
-        err: impl std::fmt::Display,
-    ) -> Self {
+    fn handle_load_failure(settings_path: &std::path::Path, err: impl std::fmt::Display) -> Self {
         loop {
             let choice = rfd::MessageDialog::new()
                 .set_title("设置加载失败")

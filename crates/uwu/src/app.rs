@@ -276,14 +276,6 @@ error: failed to enable premultiplied alpha for window: {:?}
             }
         }
 
-        let screen_descriptor = ScreenDescriptor {
-            size_in_pixels: [
-                render_state.surface_config.width,
-                render_state.surface_config.height,
-            ],
-            pixels_per_point: window.scale_factor() as f32 * render_state.scale_factor,
-        };
-
         let surface_texture = render_state.surface.get_current_texture();
 
         let surface_texture = match surface_texture {
@@ -314,6 +306,14 @@ error: failed to enable premultiplied alpha for window: {:?}
 
         // fixes a borrow checker error
         let ctx = &(render_state.egui_renderer.context().clone());
+
+        let screen_descriptor = ScreenDescriptor {
+            size_in_pixels: [
+                render_state.surface_config.width,
+                render_state.surface_config.height,
+            ],
+            pixels_per_point: ctx.pixels_per_point(),
+        };
 
         // --- plugin hooks ---
         for loaded in &mut self.state.plugins {
