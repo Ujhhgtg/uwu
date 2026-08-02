@@ -19,7 +19,7 @@ use crate::{
         self, export,
         stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start},
         ui::{
-            PageAction, UiExt, add_new_page_state, apply_theme_mode_and_canvas_color,
+            PageAction, UiExt, add_new_page_state, apply_theme_mode_and_canvas_color_to_all,
             apply_window_mode, clear_interaction_state, load_page_from_file, save_page_to_file,
             switch_to_page_state,
         },
@@ -164,20 +164,12 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                 .changed()
                 && !state.is_overlay_mode
             {
-                apply_theme_mode_and_canvas_color(
-                    ctx,
-                    state.persistent.theme_mode,
-                    state.persistent.canvas_color,
-                );
+                apply_theme_mode_and_canvas_color_to_all(state, ctx);
             }
             if ui.button("重置").clicked() {
                 state.persistent.canvas_color = utils::get_default_canvas_color();
                 if !state.is_overlay_mode {
-                    apply_theme_mode_and_canvas_color(
-                        ctx,
-                        state.persistent.theme_mode,
-                        state.persistent.canvas_color,
-                    );
+                    apply_theme_mode_and_canvas_color_to_all(state, ctx);
                 }
             }
         });
@@ -206,11 +198,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                     )
                     .clicked()
             {
-                apply_theme_mode_and_canvas_color(
-                    ctx,
-                    state.persistent.theme_mode,
-                    state.persistent.canvas_color,
-                );
+                apply_theme_mode_and_canvas_color_to_all(state, ctx);
             }
         });
 
@@ -760,13 +748,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             if ui.button("OK").clicked() {
                 clear_interaction_state(state);
                 state.persistent = PersistentState::default();
-                if !state.is_overlay_mode {
-                    apply_theme_mode_and_canvas_color(
-                        ctx,
-                        state.persistent.theme_mode,
-                        state.persistent.canvas_color,
-                    );
-                }
+                apply_theme_mode_and_canvas_color_to_all(state, ctx);
                 state
                     .command_queue
                     .push(AppCommand::SetPresentMode(state.persistent.present_mode));
@@ -876,15 +858,7 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
                     state.current_tool = CanvasTool::Brush;
                 }
                 clear_interaction_state(state);
-                apply_theme_mode_and_canvas_color(
-                    ui.ctx(),
-                    state.persistent.theme_mode,
-                    if state.is_overlay_mode {
-                        Color32::TRANSPARENT
-                    } else {
-                        state.persistent.canvas_color
-                    },
-                );
+                apply_theme_mode_and_canvas_color_to_all(state, ui.ctx());
             }
         });
 

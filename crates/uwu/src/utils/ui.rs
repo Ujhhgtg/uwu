@@ -44,6 +44,25 @@ pub fn apply_theme_mode_and_canvas_color(
     }
 }
 
+/// Applies the current theme to the given context and mirrors it to the other
+/// window (the main window in overlay mode, or the toolbar helper window in
+/// normal mode). The main window uses a transparent canvas in overlay mode.
+pub fn apply_theme_mode_and_canvas_color_to_all(state: &AppState, ctx: &Context) {
+    apply_theme_mode_and_canvas_color(
+        ctx,
+        state.persistent.theme_mode,
+        state.persistent.canvas_color,
+    );
+    if let Some(aux) = &state.auxiliary_ctx {
+        let aux_color = if state.is_overlay_mode {
+            Color32::TRANSPARENT
+        } else {
+            state.persistent.canvas_color
+        };
+        apply_theme_mode_and_canvas_color(aux, state.persistent.theme_mode, aux_color);
+    }
+}
+
 pub fn apply_window_mode(state: &mut AppState, window: &Arc<Window>) {
     match state.persistent.window_mode {
         WindowMode::Windowed => {

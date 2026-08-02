@@ -1442,6 +1442,10 @@ pub struct AppState {
     pub plugins: Vec<LoadedPlugin>,
 
     pub initial_file: Option<PathBuf>,
+
+    /// egui context of the toolbar helper window, so theme and canvas color
+    /// changes can be mirrored to the other window in overlay mode.
+    pub auxiliary_ctx: Option<egui::Context>,
 }
 
 impl Default for AppState {
@@ -1494,6 +1498,7 @@ impl Default for AppState {
                 y: 0.0_f64,
             },
             initial_file: None,
+            auxiliary_ctx: None,
         }
     }
 }

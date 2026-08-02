@@ -101,6 +101,7 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
             self.state.persistent.theme_mode,
             self.state.persistent.canvas_color,
         );
+        self.state.auxiliary_ctx = Some(ctx);
 
         self.toolbar_window = Some(OverlayToolbar {
             window,
@@ -123,6 +124,7 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
     }
 
     fn destroy_toolbar_window(&mut self) {
+        self.state.auxiliary_ctx = None;
         self.toolbar_window = None;
     }
 
