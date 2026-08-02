@@ -68,6 +68,7 @@ pub fn calculate_dynamic_width(
     point_index: usize,
     total_points: usize,
     speed: Option<f32>,
+    pressure: Option<f32>,
 ) -> StrokeWidth {
     let width = match mode {
         DynamicBrushWidthMode::Disabled => return StrokeWidth::Fixed(base_width),
@@ -96,6 +97,12 @@ pub fn calculate_dynamic_width(
                 base_width
             }
         }
+
+        DynamicBrushWidthMode::PressureBased => match pressure {
+            Some(p) => base_width * p.clamp(0.1, 1.0),
+            // No pressure source (e.g. a mouse): keep the fixed base width.
+            None => return StrokeWidth::Fixed(base_width),
+        },
     };
     StrokeWidth::Dynamic(vec![width])
 }
@@ -859,5 +866,29 @@ mod tests {
         ];
         let triangles = triangulate_polygon(&polygon);
         assert_eq!(triangles.len(), 4);
+    }
+
+    #[test]
+    fn test_pressure_based_dynamic_width() {
+        let width = calculate_dynamic_width(
+            10.0,
+            DynamicBrushWidthMode::PressureBased,
+            0,
+            1,
+            None,
+            Some(0.5),
+        );
+        assert_eq!(width.first(), 5.0);
+
+        // Without a pressure source the stroke keeps the fixed base width.
+        let width = calculate_dynamic_width(
+            10.0,
+            DynamicBrushWidthMode::PressureBased,
+            0,
+            1,
+            None,
+            None,
+        );
+        assert!(matches!(width, StrokeWidth::Fixed(w) if w == 10.0));
     }
 }

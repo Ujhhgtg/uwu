@@ -632,12 +632,14 @@ impl ApplicationHandler<()> for App {
             WindowEvent::Touch(Touch {
                 phase,
                 location,
+                force,
                 id,
                 ..
             }) => {
                 // Convert touch location to logical coordinates (screen space)
                 let window = self.window.as_ref().unwrap();
                 let scale_factor = window.scale_factor() as f32;
+                let pressure = force.as_ref().map(|f| f.normalized() as f32);
                 let screen_pos = Pos2::new(
                     location.x as f32 / scale_factor,
                     location.y as f32 / scale_factor,
@@ -672,7 +674,7 @@ impl ApplicationHandler<()> for App {
                             self.state.init_pinch_if_two_panning();
                         }
                         CanvasTool::Brush => {
-                            brush_stroke_start(&mut self.state, id, pos);
+                            brush_stroke_start(&mut self.state, id, pos, pressure);
                         }
                         CanvasTool::Select
                             if !self.state.pointers.values().any(|p| {
@@ -795,7 +797,7 @@ impl ApplicationHandler<()> for App {
                             }
                         }
                         CanvasTool::Brush => {
-                            brush_stroke_add_point(&mut self.state, id, pos, false);
+                            brush_stroke_add_point(&mut self.state, id, pos, false, pressure);
                         }
                         CanvasTool::Select => {
                             if let Some(pointer) = self.state.pointers.get_mut(&id) {

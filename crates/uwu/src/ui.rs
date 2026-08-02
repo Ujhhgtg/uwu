@@ -323,7 +323,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         }
 
         ui.horizontal(|ui| {
-            ui.my_label("动态画笔宽度微调:");
+            ui.my_label("动态画笔宽度:");
             ui.selectable_value(
                 &mut state.dynamic_brush_width_mode,
                 DynamicBrushWidthMode::Disabled,
@@ -338,6 +338,11 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                 &mut state.dynamic_brush_width_mode,
                 DynamicBrushWidthMode::SpeedBased,
                 "基于速度",
+            );
+            ui.selectable_value(
+                &mut state.dynamic_brush_width_mode,
+                DynamicBrushWidthMode::PressureBased,
+                "基于压感",
             );
         });
 
@@ -2864,11 +2869,11 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         && screen_pos.y <= rect.max.y
                         && let Some(pos) = canvas_pos
                     {
-                        brush_stroke_start(state, 0, pos);
+                        brush_stroke_start(state, 0, pos, None);
                     }
                 } else if response.dragged() {
                     if is_drawing && let Some(pos) = canvas_pos {
-                        brush_stroke_add_point(state, 0, pos, false);
+                        brush_stroke_add_point(state, 0, pos, false, None);
                     }
                 } else if response.drag_stopped() {
                     if is_drawing {
@@ -2904,7 +2909,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     && is_drawing
                     && let Some(pos) = canvas_pos
                 {
-                    brush_stroke_add_point(state, 0, pos, true);
+                    brush_stroke_add_point(state, 0, pos, true, None);
                 }
             }
         }

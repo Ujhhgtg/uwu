@@ -39,6 +39,7 @@ pub enum DynamicBrushWidthMode {
     Disabled, // No dynamic width adjustment
     BrushTip,   // Simulates brush tip pressure for calligraphy effect
     SpeedBased, // Adjusts width based on drawing speed
+    PressureBased, // Maps stylus/touch pressure to stroke width
 }
 
 /// Stroke width representation
@@ -1122,6 +1123,7 @@ pub struct ActiveStroke {
     pub points: Vec<Pos2>,
     pub width: StrokeWidth,
     pub times: Vec<f64>,             // 每个点的时间戳（用于速度计算）
+    pub pressures: Vec<f32>,         // 每个点的归一化压感 (0.0-1.0, 无压感时为 0)
     pub start_time: Instant,         // 笔画开始时间
     pub last_movement_time: Instant, // 最后一次移动的时间（用于检测停留）
 }

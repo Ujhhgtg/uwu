@@ -8,7 +8,7 @@ use crate::state::{
 };
 
 #[cfg_attr(feature = "profiling", profiling::function)]
-pub fn brush_stroke_start(state: &mut AppState, pointer_id: u64, pos: Pos2) {
+pub fn brush_stroke_start(state: &mut AppState, pointer_id: u64, pos: Pos2, pressure: Option<f32>) {
     let start_time = Instant::now();
     let width = super::calculate_dynamic_width(
         state.brush_width,
@@ -16,6 +16,7 @@ pub fn brush_stroke_start(state: &mut AppState, pointer_id: u64, pos: Pos2) {
         0,
         1,
         None,
+        pressure,
     );
     state.pointers.insert(
         pointer_id,
@@ -28,6 +29,7 @@ pub fn brush_stroke_start(state: &mut AppState, pointer_id: u64, pos: Pos2) {
                     points: vec![pos],
                     width,
                     times: vec![0.0],
+                    pressures: vec![pressure.unwrap_or(0.0)],
                     start_time,
                     last_movement_time: start_time,
                 },
@@ -42,6 +44,7 @@ pub fn brush_stroke_add_point(
     pointer_id: u64,
     pos: Pos2,
     apply_straightening: bool,
+    pressure: Option<f32>,
 ) {
     let Some(pointer) = state.pointers.get_mut(&pointer_id) else {
         return;
@@ -74,6 +77,17 @@ pub fn brush_stroke_add_point(
                     } else {
                         StrokeWidth::Dynamic(vec![first_width, last_width])
                     };
+
+                    // Keep pressure samples aligned with the straightened points.
+                    if active_stroke.pressures.len() >= 2 {
+                        let first_pressure = active_stroke.pressures[0];
+                        let last_pressure = *active_stroke.pressures.last().unwrap();
+                        active_stroke.pressures = if active_stroke.points.len() == 1 {
+                            vec![first_pressure]
+                        } else {
+                            vec![first_pressure, last_pressure]
+                        };
+                    }
                 }
             }
             active_stroke.last_movement_time = Instant::now();
@@ -95,6 +109,7 @@ pub fn brush_stroke_add_point(
 
         active_stroke.points.push(pos);
         active_stroke.times.push(current_time);
+        active_stroke.pressures.push(pressure.unwrap_or(0.0));
 
         if state.dynamic_brush_width_mode != DynamicBrushWidthMode::Disabled {
             let stroke_width = super::calculate_dynamic_width(
@@ -103,6 +118,7 @@ pub fn brush_stroke_add_point(
                 active_stroke.points.len() - 1,
                 active_stroke.points.len(),
                 speed,
+                pressure,
             );
             active_stroke.width.push(stroke_width.first());
         }
