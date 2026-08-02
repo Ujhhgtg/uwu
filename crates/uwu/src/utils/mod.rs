@@ -315,6 +315,65 @@ pub fn get_default_canvas_color() -> Color32 {
     Color32::from_rgb(15, 38, 30)
 }
 
+/// Opens `path` with the system's default application for its file type.
+pub fn open_with_default_app(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        use windows::core::PCWSTR;
+
+        let file_w: Vec<u16> = OsStr::new(path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let verb_w: Vec<u16> = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let hinst = unsafe {
+            ShellExecuteW(
+                None,
+                PCWSTR(verb_w.as_ptr()),
+                PCWSTR(file_w.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if hinst.0 as usize <= 32 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "opening files with the default application is unsupported on this platform",
+        ))
+    }
+}
+
 // 绘制调整句柄
 #[cfg_attr(feature = "profiling", profiling::function)]
 pub fn draw_resize_handles(painter: &egui::Painter, bbox: Rect) {

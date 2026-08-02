@@ -834,12 +834,61 @@ impl PersistentState {
     // 加载设置从文件
     pub fn load_from_file() -> Self {
         let settings_path = Self::get_settings_path();
-        if let Ok(content) = std::fs::read_to_string(settings_path)
-            && let Ok(settings) = serde_json::from_str(&content)
-        {
-            return settings;
+        if !settings_path.exists() {
+            // First launch: no settings file yet, use defaults silently.
+            return Self::default();
         }
-        Self::default()
+
+        match std::fs::read_to_string(&settings_path) {
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(settings) => settings,
+                Err(err) => Self::handle_load_failure(&settings_path, err),
+            },
+            Err(err) => Self::handle_load_failure(&settings_path, err),
+        }
+    }
+
+    /// Shows a system dialog when the settings file cannot be read or parsed,
+    /// letting the user reset it, open it with the default application, or exit.
+    fn handle_load_failure(
+        settings_path: &std::path::Path,
+        err: impl std::fmt::Display,
+    ) -> Self {
+        loop {
+            let choice = rfd::MessageDialog::new()
+                .set_title("设置加载失败")
+                .set_level(rfd::MessageLevel::Warning)
+                .set_description(format!(
+                    "无法加载设置文件:\n{}\n\n原因: {err}\n\n请选择:\n1. 重置设置并启动\n2. 用系统默认方式打开设置文件（修复后将重新加载）\n3. 退出",
+                    settings_path.display()
+                ))
+                .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
+                    "重置设置并启动".into(),
+                    "打开设置文件".into(),
+                    "退出".into(),
+                ))
+                .show();
+
+            match choice {
+                rfd::MessageDialogResult::Yes => {
+                    let defaults = Self::default();
+                    if let Err(e) = defaults.save_to_file() {
+                        eprintln!("failed to write default settings after reset: {e}");
+                    }
+                    return defaults;
+                }
+                rfd::MessageDialogResult::No => {
+                    if let Err(e) = crate::utils::open_with_default_app(settings_path) {
+                        eprintln!("failed to open settings file: {e}");
+                    }
+                    // Loop so the user can retry after fixing the file.
+                }
+                _ => {
+                    eprintln!("exiting because the settings file could not be loaded");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     // 保存设置到文件
