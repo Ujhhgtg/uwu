@@ -513,12 +513,18 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
             // 显示当前选择的视频模式
             if state.persistent.window_mode == WindowMode::ExclusiveFullscreen {
-                let mut current_selection = state.selected_video_mode_index.unwrap_or(0);
+                if state.fullscreen_video_modes.is_empty() {
+                    ui.my_label(egui::RichText::new("(无可用显示模式)").italics());
+                    return;
+                }
 
-                let mode = state
-                    .fullscreen_video_modes
-                    .get(current_selection)
-                    .expect("no video mode available");
+                // Clamp a stale selection (e.g. after switching monitors).
+                let mut current_selection = state
+                    .selected_video_mode_index
+                    .filter(|&i| i < state.fullscreen_video_modes.len())
+                    .unwrap_or(0);
+                state.selected_video_mode_index = Some(current_selection);
+                let mode = &state.fullscreen_video_modes[current_selection];
 
                 let mode_text = format!(
                     "{}x{} @ {}Hz",

@@ -78,14 +78,18 @@ pub fn apply_window_mode(state: &mut AppState, window: &Arc<Window>) {
             {
                 window.set_fullscreen(Some(Fullscreen::Exclusive(mode.clone())));
             } else {
-                // 回退到第一个可用的视频模式
-                window.set_fullscreen(Some(Fullscreen::Exclusive(
-                    state
-                        .fullscreen_video_modes
-                        .first()
-                        .expect("no video mode available")
-                        .clone(),
-                )));
+                // 回退到第一个可用的视频模式; if there are none (e.g. no
+                // monitor available), fall back to borderless fullscreen
+                // instead of panicking.
+                if let Some(mode) = state.fullscreen_video_modes.first() {
+                    window.set_fullscreen(Some(Fullscreen::Exclusive(mode.clone())));
+                } else {
+                    eprintln!(
+                        "warning: no exclusive fullscreen video modes available, \
+                         falling back to borderless fullscreen"
+                    );
+                    window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                }
             }
         }
         WindowMode::BorderlessFullscreen => {
