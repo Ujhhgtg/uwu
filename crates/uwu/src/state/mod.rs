@@ -762,10 +762,11 @@ pub struct PersistentState {
     pub force_redraw_every_frame: bool,
 
     #[serde(default)]
-    pub keep_insertion_window_open: bool,
-
-    #[serde(default)]
     pub show_welcome_window_on_start: bool,
+
+    /// 插入后保持插入窗口（合并自原「连续插入」），持久化，默认关闭。
+    #[serde(default)]
+    pub continuous_insert: bool,
 
     #[serde(default)]
     pub easter_egg_redo: bool,
@@ -800,9 +801,8 @@ impl Default for PersistentState {
             low_latency_mode: false,
             force_redraw_every_frame: false,
 
-            keep_insertion_window_open: true,
-
             show_welcome_window_on_start: true,
+            continuous_insert: false,
 
             easter_egg_redo: false,
             disable_edge_gestures: false,
@@ -1423,7 +1423,6 @@ pub struct AppState {
     pub current_tool: CanvasTool,             // 当前工具
     pub current_insert_tab: InsertTab,        // 插入工具的当前标签页
     pub selected_shape_type: Option<CanvasShapeType>, // 插入形状时选中的形状类型
-    pub continuous_insert: bool,              // 是否连续插入形状
     pub shapes_inserted_count: u32,           // 已插入形状的计数
     pub eraser_size: f32,                     // 橡皮擦大小
     pub marquee_match_mode: MarqueeMatchMode, // 多选框匹配模式
@@ -1490,7 +1489,6 @@ impl Default for AppState {
             current_tool: CanvasTool::Brush,
             current_insert_tab: InsertTab::Shape,
             selected_shape_type: None,
-            continuous_insert: false,
             shapes_inserted_count: 0,
             eraser_size: 10.0,
             marquee_match_mode: MarqueeMatchMode::default(),

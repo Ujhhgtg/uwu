@@ -371,11 +371,6 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             ui.checkbox(&mut state.persistent.low_latency_mode, "");
         });
 
-        ui.horizontal(|ui| {
-            ui.my_label("插入后保持插入窗口:");
-            ui.checkbox(&mut state.persistent.keep_insertion_window_open, "");
-        });
-
         #[cfg(windows)]
         ui.horizontal(|ui| {
             ui.my_label("禁用系统边缘手势:");
@@ -1614,7 +1609,7 @@ fn ui_toolbar_tools_content(
                                 .save_add_object(index, CanvasObject::Image(new_image.clone()));
                             state.canvas.objects.push(CanvasObject::Image(new_image));
 
-                            if !state.persistent.keep_insertion_window_open {
+                            if !state.persistent.continuous_insert {
                                 state.current_tool = CanvasTool::Select;
                                 if state.is_overlay_mode {
                                     state.command_queue.push(AppCommand::UpdateCursorHittest);
@@ -1703,7 +1698,7 @@ fn ui_toolbar_tools_content(
                     ui.my_label(egui::RichText::new("(在画布上滑动以绘制形状)").italics());
                 }
 
-                ui.checkbox(&mut state.continuous_insert, "连续插入");
+                ui.checkbox(&mut state.persistent.continuous_insert, "连续插入");
             }
             InsertTab::Text => {
                 ui.horizontal(|ui| {
@@ -1734,7 +1729,7 @@ fn ui_toolbar_tools_content(
                             .history
                             .save_add_object(index, CanvasObject::Text(new_text.clone()));
                         state.canvas.objects.push(CanvasObject::Text(new_text));
-                        if !state.persistent.keep_insertion_window_open {
+                        if !state.persistent.continuous_insert {
                             state.current_tool = CanvasTool::Select;
                             if state.is_overlay_mode {
                                 state.command_queue.push(AppCommand::UpdateCursorHittest);

@@ -338,18 +338,64 @@ pub fn create_shape_object(
     }
 
     state.shapes_inserted_count += 1;
-    if !state.persistent.keep_insertion_window_open
-        && !state.continuous_insert
-        && state.shapes_inserted_count >= 1
-    {
+    if !state.persistent.continuous_insert && state.shapes_inserted_count >= 1 {
+        // 插入后保持插入窗口关闭时: 插入一次后切回画笔。
         state.current_tool = CanvasTool::Brush;
         if state.is_overlay_mode {
             state.command_queue.push(AppCommand::UpdateCursorHittest);
         }
-    } else if !state.continuous_insert {
-        // The insertion window stays open: require an explicit shape pick for
-        // the next insert instead of drawing the same shape again.
-        state.selected_shape_type = None;
-        state.shapes_inserted_count = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_continuous_insert_defaults_to_off() {
+        assert!(!crate::state::PersistentState::default().continuous_insert);
+    }
+
+    #[test]
+    fn test_continuous_insert_keeps_insert_window_open() {
+        let mut state = AppState {
+            current_tool: CanvasTool::Insert,
+            selected_shape_type: Some(CanvasShapeType::Rectangle),
+            ..Default::default()
+        };
+        state.persistent.continuous_insert = true;
+
+        create_shape_object(
+            &mut state,
+            CanvasShapeType::Rectangle,
+            Pos2::new(0.0, 0.0),
+            Pos2::new(10.0, 10.0),
+        );
+
+        // Keep-insert semantics: stay in the Insert tool and keep the same
+        // shape selected so the next insert can start immediately.
+        assert!(matches!(state.current_tool, CanvasTool::Insert));
+        assert_eq!(state.selected_shape_type, Some(CanvasShapeType::Rectangle));
+        assert_eq!(state.canvas.objects.len(), 1);
+    }
+
+    #[test]
+    fn test_continuous_insert_off_switches_to_brush() {
+        let mut state = AppState {
+            current_tool: CanvasTool::Insert,
+            selected_shape_type: Some(CanvasShapeType::Circle),
+            ..Default::default()
+        };
+        state.persistent.continuous_insert = false;
+
+        create_shape_object(
+            &mut state,
+            CanvasShapeType::Circle,
+            Pos2::new(0.0, 0.0),
+            Pos2::new(10.0, 10.0),
+        );
+
+        assert!(matches!(state.current_tool, CanvasTool::Brush));
+        assert_eq!(state.canvas.objects.len(), 1);
     }
 }
