@@ -819,7 +819,14 @@ impl PersistentState {
     pub fn save_to_file(&self) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let settings_path = Self::get_settings_path();
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(settings_path, content)?;
+        // Write to a temporary file in the same directory and rename it, so a
+        // crash mid-write cannot leave a truncated/corrupt settings file.
+        let tmp_path = settings_path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, content)?;
+        if let Err(err) = std::fs::rename(&tmp_path, &settings_path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(err.into());
+        }
         Ok(())
     }
 }
