@@ -8,7 +8,7 @@ crate-type = ["dylib"]
 
 [dependencies]
 plugin_api = { path = "../plugin_api" }
-egui = { version = "0.34", default-features = false }
+egui = { version = "0.35", default-features = false }
 rodio = { version = "0.22", default-features = false, features = [
     "wav",
     "playback",

@@ -10,6 +10,16 @@ resolver = "3"
 [patch.crates-io]
 puffin = { git = "https://github.com/EmbarkStudios/puffin" }      # crates.io version uses out-of-date egui
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin" } # crates.io version uses out-of-date egui
+# egui master (pinned) is the first version line with wgpu v30 support; the
+# crates.io 0.35.0 release still requires wgpu 29.
+egui = { git = "https://github.com/emilk/egui", rev = "3fcadda5ba186c9a0f8c1546e2a3fefae6b1e863" }
+emath = { git = "https://github.com/emilk/egui", rev = "3fcadda5ba186c9a0f8c1546e2a3fefae6b1e863" }
+epaint = { git = "https://github.com/emilk/egui", rev = "3fcadda5ba186c9a0f8c1546e2a3fefae6b1e863" }
+egui-winit = { git = "https://github.com/emilk/egui", rev = "3fcadda5ba186c9a0f8c1546e2a3fefae6b1e863" }
+egui-wgpu = { git = "https://github.com/emilk/egui", rev = "3fcadda5ba186c9a0f8c1546e2a3fefae6b1e863" }
+# egui-notify 0.22 on crates.io still targets egui 0.34; this is the open
+# "Updated to egui 0.35" PR (https://github.com/ItsEthra/egui-notify/pull/50).
+egui-notify = { git = "https://github.com/ItsEthra/egui-notify", rev = "3dfaa2473e385b69e22656b8ea7a13bb74ff7576" }
 
 [profile.release]
 strip = true

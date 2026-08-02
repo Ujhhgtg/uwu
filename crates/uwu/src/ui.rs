@@ -1885,7 +1885,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
     );
     panel_ui.set_clip_rect(ctx.content_rect());
 
-    CentralPanel::default().show_inside(&mut panel_ui, |ui| {
+    CentralPanel::default().show(&mut panel_ui, |ui| {
         let (rect, response) = ui.allocate_exact_size(
             ui.available_size(),
             if !state.persistent.low_latency_mode {

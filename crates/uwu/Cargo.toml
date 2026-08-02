@@ -16,14 +16,14 @@ mimalloc = ["dep:mimalloc"]
 
 [dependencies]
 # ui & render
-egui = { version = "0.34", default-features = false, features = [
+egui = { version = "0.35", default-features = false, features = [
     "serde",
     "rayon",
 ] }
-egui-winit = { version = "0.34", default-features = false }
+egui-winit = { version = "0.35", default-features = false }
 winit = { version = "0.30", default-features = false }
-egui-wgpu = { version = "0.34", features = ["winit"] }
-wgpu = { version = "29", default-features = false, features = [
+egui-wgpu = { version = "0.35", features = ["winit"] }
+wgpu = { version = "30", default-features = false, features = [
     "dx12",
     "metal",
     "parking_lot",
@@ -74,11 +74,11 @@ winres = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = { version = "0.22", default-features = false }
-egui-winit = { version = "0.34", default-features = false, features = [
+egui-winit = { version = "0.35", default-features = false, features = [
     "wayland",
 ] }
 winit = { version = "0.30", default-features = false, features = ["wayland"] }
-egui-wgpu = { version = "0.34", features = ["wayland"] }
+egui-wgpu = { version = "0.35", features = ["wayland"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

@@ -435,7 +435,9 @@ error: failed to enable premultiplied alpha for window: {:?}
                 timeout: None,
             });
 
-            let data = buffer_slice.get_mapped_range();
+            let data = buffer_slice
+                .get_mapped_range()
+                .expect("failed to read screenshot buffer");
 
             let mut pixels = vec![0u8; (width * height * 4) as usize];
 
@@ -478,7 +480,7 @@ error: failed to enable premultiplied alpha for window: {:?}
             render_state.queue.submit(Some(encoder.finish()));
         }
 
-        surface_texture.present();
+        render_state.queue.present(surface_texture);
 
         if self.state.persistent.show_fps {
             _ = self.state.fps_counter.update();

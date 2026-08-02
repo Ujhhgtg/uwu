@@ -95,6 +95,7 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::AutoVsync,
@@ -221,7 +222,7 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
         let mut toolbar_rect = None;
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(egui::Color32::TRANSPARENT))
-            .show_inside(&mut panel_ui, |ui| {
+            .show(&mut panel_ui, |ui| {
                 toolbar_rect = ui::ui_toolbar(
                     &mut self.state,
                     ui.ctx(),
@@ -270,7 +271,7 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
         );
 
         render_state.queue.submit(Some(encoder.finish()));
-        surface_texture.present();
+        render_state.queue.present(surface_texture);
     }
 
     pub fn manage_overlay_toolbar(&mut self, event_loop: &ActiveEventLoop) {

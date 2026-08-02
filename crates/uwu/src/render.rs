@@ -34,6 +34,7 @@ impl RenderState {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
+                apply_limit_buckets: false,
             })
             .await
             .expect("failed to find an appropriate adapter");
@@ -60,6 +61,7 @@ impl RenderState {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
             format: TextureFormat::Bgra8UnormSrgb,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width,
             height,
             present_mode,
