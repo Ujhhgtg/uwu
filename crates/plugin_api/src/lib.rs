@@ -1,6 +1,17 @@
+use std::ffi::CStr;
+
 /// The rustc version string embedded at build time.
 /// Format: `"rustc X.Y.Z (hash YYYY-MM-DD)"`.
 pub const RUSTC_VERSION: &str = env!("RUSTC_VERSION");
+
+/// NUL-terminated rustc version string for the plugin C ABI.
+///
+/// Plugin crates export this pointer from their `plugin_rustc_version`
+/// symbol, so they do not need their own build script.
+pub static RUSTC_VERSION_CSTR: &CStr = unsafe {
+    // Safety: concat! produces a byte string with a trailing NUL at compile time.
+    CStr::from_bytes_with_nul_unchecked(concat!(env!("RUSTC_VERSION"), "\0").as_bytes())
+};
 
 /// Trait that every plugin must implement.
 ///

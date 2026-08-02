@@ -1,12 +1,4 @@
-use std::ffi::CStr;
-
 use plugin_api::Plugin;
-
-/// NUL-terminated rustc version string for C FFI.
-static RUSTC_VERSION_CSTR: &CStr = {
-    // Safety: concat! produces a byte string with a trailing NUL at compile time.
-    unsafe { CStr::from_bytes_with_nul_unchecked(concat!(env!("RUSTC_VERSION"), "\0").as_bytes()) }
-};
 
 struct ExamplePlugin;
 
@@ -52,7 +44,7 @@ impl Plugin for ExamplePlugin {
 /// potentially-mismatched rustc versions — it uses raw C ABI only.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plugin_rustc_version() -> *const std::ffi::c_char {
-    RUSTC_VERSION_CSTR.as_ptr()
+    plugin_api::RUSTC_VERSION_CSTR.as_ptr()
 }
 
 /// Constructs and returns a `Box<dyn Plugin>` as a raw fat-pointer.

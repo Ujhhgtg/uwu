@@ -10,6 +10,8 @@ uwu supports loading Rust dynamic libraries (`.so` / `.dylib` / `.dll`) at runti
 - `crate-type = ["dylib"]` (Rust dynamic library, **not** `cdylib`)
 - Dependency on `plugin_api` crate from this workspace
 - Same version of `egui` as the host
+- No build script needed: `plugin_api` embeds the rustc version string and
+  exposes it as `plugin_api::RUSTC_VERSION_CSTR` for the C ABI export.
 
 ## Quick Start
 
@@ -27,47 +29,14 @@ crate-type = ["dylib"]
 
 [dependencies]
 plugin_api = { path = "../path/to/plugin_api" }
-egui = { version = "*", default-features = false }
+egui = { version = "0.34", default-features = false }
 ```
 
-### 2. Add a build.rs
-
-Each plugin crate needs its own `build.rs` to embed the rustc version string:
-
-```rust
-// my_plugin/build.rs
-use std::process::Command;
-
-fn main() {
-    let rustc_version = Command::new("rustc")
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8(o.stdout).ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let version_trimmed = rustc_version.trim();
-    println!("cargo:rustc-env=RUSTC_VERSION={}", version_trimmed);
-    println!("cargo:rerun-if-changed=build.rs");
-}
-```
-
-### 3. Implement the Plugin trait
+### 2. Implement the Plugin trait
 
 ```rust
 // my_plugin/src/lib.rs
-use std::ffi::CStr;
 use plugin_api::Plugin;
-
-static RUSTC_VERSION_CSTR: &CStr = {
-    unsafe { CStr::from_bytes_with_nul_unchecked(concat!(env!("RUSTC_VERSION"), "\0").as_bytes()) }
-};
 
 struct MyPlugin;
 
@@ -93,7 +62,7 @@ impl Plugin for MyPlugin {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plugin_rustc_version() -> *const std::ffi::c_char {
-    RUSTC_VERSION_CSTR.as_ptr()
+    plugin_api::RUSTC_VERSION_CSTR.as_ptr()
 }
 
 #[unsafe(no_mangle)]

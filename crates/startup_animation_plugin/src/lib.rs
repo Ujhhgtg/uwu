@@ -1,6 +1,5 @@
 mod assets;
 
-use std::ffi::CStr;
 use std::time::Instant;
 
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
@@ -10,10 +9,6 @@ use rodio::Player;
 use std::io::Cursor;
 
 use plugin_api::Plugin;
-
-static RUSTC_VERSION_CSTR: &CStr = {
-    unsafe { CStr::from_bytes_with_nul_unchecked(concat!(env!("RUSTC_VERSION"), "\0").as_bytes()) }
-};
 
 struct StartupAnimationPlugin {
     fps: f32,
@@ -161,7 +156,7 @@ impl StartupAnimationPlugin {
 /// must only be read as a C string by the host.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plugin_rustc_version() -> *const std::ffi::c_char {
-    RUSTC_VERSION_CSTR.as_ptr()
+    plugin_api::RUSTC_VERSION_CSTR.as_ptr()
 }
 
 /// Constructs and returns a `Box<dyn Plugin>` as a raw fat pointer.
