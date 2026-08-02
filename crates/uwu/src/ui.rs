@@ -839,12 +839,40 @@ pub fn ui_history(state: &mut AppState, ui: &mut Ui) {
 
 pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window>) {
     ui.horizontal(|ui| {
-        if ui.button("退出").clicked() {
-            state.should_quit = true;
+        // Auto-revert the toolbar confirmation when it times out.
+        if state
+            .toolbar_exit_confirm_at
+            .is_some_and(|t| t.elapsed() >= crate::state::EXIT_CONFIRM_TIMEOUT)
+        {
+            state.toolbar_exit_confirm_at = None;
         }
 
-        if ui.button("最小化").clicked() {
-            window.set_minimized(true);
+        if state.toolbar_exit_confirm_at.is_some() {
+            // Second stage: red 确定 exits, green 取消 restores the buttons.
+            if ui
+                .add(egui::Button::new(
+                    egui::RichText::new("确定").color(Color32::RED),
+                ))
+                .clicked()
+            {
+                state.should_quit = true;
+            }
+            if ui
+                .add(egui::Button::new(
+                    egui::RichText::new("取消").color(Color32::GREEN),
+                ))
+                .clicked()
+            {
+                state.toolbar_exit_confirm_at = None;
+            }
+        } else {
+            if ui.button("退出").clicked() {
+                state.toolbar_exit_confirm_at = Some(std::time::Instant::now());
+            }
+
+            if ui.button("最小化").clicked() {
+                window.set_minimized(true);
+            }
         }
 
         ui.horizontal(|ui| {

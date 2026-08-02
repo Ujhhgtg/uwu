@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use wgpu::Backend;
 use wgpu::PresentMode;
 use winit::dpi::PhysicalPosition;
@@ -28,6 +28,9 @@ pub(crate) fn make_canvas_file_header() -> [u8; 4] {
     h[3] = CANVAS_FILE_VERSION;
     h
 }
+
+/// Window inside which a second exit request confirms quitting.
+pub const EXIT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Dynamic brush width mode for stroke rendering
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1453,6 +1456,11 @@ pub struct AppState {
     pub show_size_preview: bool,
     pub new_text_content: String,
     pub should_quit: bool,
+    /// First generic exit request (Esc / window close) timestamp; a second
+    /// request inside [`EXIT_CONFIRM_TIMEOUT`] confirms the exit.
+    pub exit_confirm_armed_at: Option<Instant>,
+    /// Toolbar "退出" button entered its confirm state at this time.
+    pub toolbar_exit_confirm_at: Option<Instant>,
     pub fullscreen_video_modes: Vec<winit::monitor::VideoModeHandle>,
     pub selected_video_mode_index: Option<usize>, // 选中的视频模式索引
     pub fps_counter: FpsCounter,                  // FPS 计数器
@@ -1511,6 +1519,8 @@ impl Default for AppState {
             should_quit: false,
             new_text_content: "".to_string(),
             fullscreen_video_modes: Vec::new(),
+            exit_confirm_armed_at: None,
+            toolbar_exit_confirm_at: None,
             selected_video_mode_index: None,
             show_quick_color_edit_window: false,
             new_quick_color: Color32::WHITE,
@@ -1542,6 +1552,23 @@ impl AppState {
     pub const MIN_ZOOM: f32 = 0.1;
     pub const MAX_ZOOM: f32 = 10.0;
     pub const ZOOM_STEP: f32 = 0.03;
+
+    /// Arms or confirms a generic exit request (Esc / window close).
+    /// Returns `true` when this is the second request inside the timeout
+    /// window, meaning the caller should exit; otherwise shows a toast.
+    pub fn request_exit(&mut self, toast: &str) -> bool {
+        if self
+            .exit_confirm_armed_at
+            .is_some_and(|t| t.elapsed() < EXIT_CONFIRM_TIMEOUT)
+        {
+            self.exit_confirm_armed_at = None;
+            true
+        } else {
+            self.exit_confirm_armed_at = Some(Instant::now());
+            self.toasts.info(toast);
+            false
+        }
+    }
 
     /// Initialize pinch-to-zoom state if there are at least two panning pointers
     pub fn init_pinch_if_two_panning(&mut self) {
@@ -1904,5 +1931,18 @@ mod tests {
         // Two CJK chars ≈ 2 * font_size wide. The old byte-count fallback
         // would have reported ~6 * 0.6 * font_size = 72 px.
         assert!((bbox.width() - 40.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_request_exit_requires_second_request_within_timeout() {
+        let mut state = AppState::default();
+
+        // First request only arms the confirmation.
+        assert!(!state.request_exit("再次按 Esc 确认退出"));
+        assert!(state.exit_confirm_armed_at.is_some());
+
+        // A second request inside the timeout window confirms the exit.
+        assert!(state.request_exit("再次按 Esc 确认退出"));
+        assert!(state.exit_confirm_armed_at.is_none());
     }
 }

@@ -604,7 +604,9 @@ impl ApplicationHandler<()> for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                self.exit(event_loop);
+                if self.state.request_exit("再次点击关闭以确认退出") {
+                    self.exit(event_loop);
+                }
             }
             WindowEvent::KeyboardInput {
                 event:
@@ -615,7 +617,9 @@ impl ApplicationHandler<()> for App {
                     },
                 ..
             } => {
-                self.exit(event_loop);
+                if self.state.request_exit("再次按 Esc 确认退出") {
+                    self.exit(event_loop);
+                }
             }
             WindowEvent::RedrawRequested => {
                 self.handle_redraw();
