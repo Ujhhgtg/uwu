@@ -1190,7 +1190,9 @@ impl History {
 
     // 保存批量操作命令
     pub fn save_batch(&mut self, commands: Vec<HistoryCommand>) {
-        self.push_command(HistoryCommand::BatchCommand { commands });
+        if !commands.is_empty() {
+            self.push_command(HistoryCommand::BatchCommand { commands });
+        }
     }
 
     // 推送命令并维护历史记录大小
@@ -1642,5 +1644,107 @@ mod tests {
         }
 
         assert_eq!(history.undo_stack.len(), 2);
+    }
+
+    /// Mirrors the command sequence the UI pushes for "置顶" (bring to front):
+    /// RemoveObject for each removed index (in removal order), then AddObject
+    /// for each re-appended object (in insertion order). Undo must restore the
+    /// original list instead of dropping the moved objects.
+    #[test]
+    fn test_bring_to_front_batch_undo_redo() {
+        let objs = ["A", "B", "C", "D"]
+            .into_iter()
+            .map(|_| create_dummy_object())
+            .collect::<Vec<_>>();
+        let obj_debug =
+            |list: &[CanvasObject]| list.iter().map(|o| format!("{o:?}")).collect::<Vec<_>>();
+        let mut state = CanvasState {
+            objects: objs.clone(),
+        };
+        let mut history = History::new(10);
+
+        // Select A (0) and B (1), move them to the end.
+        let mut indices = [0usize, 1];
+        indices.sort_unstable();
+        let mut moved = Vec::new();
+        let mut commands = Vec::new();
+        for &idx in indices.iter().rev() {
+            let obj = state.objects.remove(idx);
+            commands.push(HistoryCommand::RemoveObject {
+                index: idx,
+                object: obj.clone(),
+            });
+            moved.push(obj);
+        }
+        moved.reverse();
+        for obj in moved {
+            let new_idx = state.objects.len();
+            state.objects.push(obj.clone());
+            commands.push(HistoryCommand::AddObject {
+                index: new_idx,
+                object: obj,
+            });
+        }
+        history.save_batch(commands);
+
+        // Undo: the original object list must be fully restored.
+        assert!(history.undo(&mut state));
+        assert_eq!(state.objects.len(), objs.len());
+        assert_eq!(obj_debug(&state.objects), obj_debug(&objs));
+
+        // Redo: front two objects are appended at the end again.
+        assert!(history.redo(&mut state));
+        assert_eq!(state.objects.len(), objs.len());
+        assert_eq!(obj_debug(&state.objects[2..3]), obj_debug(&objs[0..1]));
+        assert_eq!(obj_debug(&state.objects[3..4]), obj_debug(&objs[1..2]));
+    }
+
+    /// Mirrors the command sequence for "置底" (bring to back).
+    #[test]
+    fn test_bring_to_back_batch_undo_redo() {
+        let objs = ["A", "B", "C", "D"]
+            .into_iter()
+            .map(|_| create_dummy_object())
+            .collect::<Vec<_>>();
+        let obj_debug =
+            |list: &[CanvasObject]| list.iter().map(|o| format!("{o:?}")).collect::<Vec<_>>();
+        let mut state = CanvasState {
+            objects: objs.clone(),
+        };
+        let mut history = History::new(10);
+
+        // Select C (2) and D (3), move them to the beginning.
+        let mut indices = [2usize, 3];
+        indices.sort_unstable();
+        let mut moved = Vec::new();
+        let mut commands = Vec::new();
+        for &idx in indices.iter().rev() {
+            let obj = state.objects.remove(idx);
+            commands.push(HistoryCommand::RemoveObject {
+                index: idx,
+                object: obj.clone(),
+            });
+            moved.push((idx, obj));
+        }
+        moved.reverse();
+        for (_, obj) in &moved {
+            state.objects.insert(0, obj.clone());
+            commands.push(HistoryCommand::AddObject {
+                index: 0,
+                object: obj.clone(),
+            });
+        }
+        history.save_batch(commands);
+
+        assert_eq!(state.objects.len(), objs.len());
+        assert_eq!(obj_debug(&state.objects[0..1]), obj_debug(&objs[2..3]));
+        assert_eq!(obj_debug(&state.objects[1..2]), obj_debug(&objs[3..4]));
+
+        assert!(history.undo(&mut state));
+        assert_eq!(obj_debug(&state.objects), obj_debug(&objs));
+
+        assert!(history.redo(&mut state));
+        assert_eq!(obj_debug(&state.objects[0..1]), obj_debug(&objs[2..3]));
+        assert_eq!(obj_debug(&state.objects[1..2]), obj_debug(&objs[3..4]));
     }
 }

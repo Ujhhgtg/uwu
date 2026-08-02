@@ -1371,14 +1371,19 @@ fn ui_toolbar_tools_content(
                     let mut indices: Vec<usize> = state.selected_object_indices.clone();
                     indices.sort_unstable();
                     let mut moved: Vec<CanvasObject> = Vec::new();
+                    let mut commands = Vec::new();
                     for &idx in indices.iter().rev() {
                         if idx < state.canvas.objects.len() {
-                            moved.push(state.canvas.objects.remove(idx));
+                            let obj = state.canvas.objects.remove(idx);
+                            commands.push(HistoryCommand::RemoveObject {
+                                index: idx,
+                                object: obj.clone(),
+                            });
+                            moved.push(obj);
                         }
                     }
                     moved.reverse();
                     let start_idx = state.canvas.objects.len();
-                    let mut commands = Vec::new();
                     for obj in moved.into_iter() {
                         let new_idx = state.canvas.objects.len();
                         state.canvas.objects.push(obj);
@@ -1397,13 +1402,18 @@ fn ui_toolbar_tools_content(
                     let mut indices: Vec<usize> = state.selected_object_indices.clone();
                     indices.sort_unstable();
                     let mut moved: Vec<(usize, CanvasObject)> = Vec::new();
+                    let mut commands = Vec::new();
                     for &idx in indices.iter().rev() {
                         if idx < state.canvas.objects.len() {
-                            moved.push((idx, state.canvas.objects.remove(idx)));
+                            let obj = state.canvas.objects.remove(idx);
+                            commands.push(HistoryCommand::RemoveObject {
+                                index: idx,
+                                object: obj.clone(),
+                            });
+                            moved.push((idx, obj));
                         }
                     }
                     moved.reverse();
-                    let mut commands = Vec::new();
                     for (_, obj) in &moved {
                         state.canvas.objects.insert(0, obj.clone());
                         commands.push(HistoryCommand::AddObject {
