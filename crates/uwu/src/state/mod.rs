@@ -174,9 +174,8 @@ pub struct CanvasImage {
     pub pos: Pos2,
     pub size: egui::Vec2,
     pub aspect_ratio: f32,
-    pub marked_for_deletion: bool, // Deferred deletion to avoid panic due to texture in use
-    pub image_data: Arc<[u8]>,     // RGBA pixel data for export
-    pub image_size: [u32; 2],      // [width, height] of the original image
+    pub image_data: Arc<[u8]>, // RGBA pixel data for export
+    pub image_size: [u32; 2],  // [width, height] of the original image
 }
 
 impl CanvasObjectOps for CanvasImage {
@@ -288,7 +287,6 @@ impl fmt::Debug for CanvasImage {
             .field("pos", &self.pos)
             .field("size", &self.size)
             .field("aspect_ratio", &self.aspect_ratio)
-            .field("marked_for_deletion", &self.marked_for_deletion)
             .field("image_size", &self.image_size)
             .finish()
     }
@@ -723,8 +721,6 @@ pub struct PersistentState {
     pub theme_mode: ThemeMode,
     #[serde(default)]
     pub canvas_color: Color32,
-    #[serde(default)]
-    pub window_opacity: f32,
 
     #[serde(default)]
     pub stroke_smoothing: bool,
@@ -757,8 +753,6 @@ pub struct PersistentState {
 
     #[serde(default)]
     pub show_welcome_window_on_start: bool,
-    #[serde(default)]
-    pub show_startup_animation: bool,
 
     #[serde(default)]
     pub easter_egg_redo: bool,
@@ -777,7 +771,6 @@ impl Default for PersistentState {
         Self {
             theme_mode: ThemeMode::default(),
             canvas_color: utils::get_default_canvas_color(),
-            window_opacity: 1.0,
 
             stroke_smoothing: true,
             stroke_straightening: true,
@@ -797,7 +790,6 @@ impl Default for PersistentState {
             keep_insertion_window_open: true,
 
             show_welcome_window_on_start: true,
-            show_startup_animation: true,
 
             easter_egg_redo: false,
             disable_edge_gestures: false,

@@ -813,7 +813,6 @@ mod tests {
             pos: Pos2::new(50.0, 50.0),
             size: egui::Vec2::new(40.0, 40.0),
             aspect_ratio: 1.0,
-            marked_for_deletion: false,
             image_data: rgba.into(),
             image_size: [2, 2],
         }));

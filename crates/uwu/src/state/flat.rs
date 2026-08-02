@@ -253,7 +253,6 @@ fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> Canvas
                 pos: Pos2::new(img.pos[0], img.pos[1]),
                 size: egui::Vec2::new(img.size[0], img.size[1]),
                 aspect_ratio: img.aspect_ratio,
-                marked_for_deletion: false,
                 image_data,
                 image_size: img.image_size,
             })

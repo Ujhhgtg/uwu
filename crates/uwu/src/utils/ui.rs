@@ -315,10 +315,18 @@ pub fn create_shape_object(
     }
 
     state.shapes_inserted_count += 1;
-    if !state.continuous_insert && state.shapes_inserted_count >= 1 {
+    if !state.persistent.keep_insertion_window_open
+        && !state.continuous_insert
+        && state.shapes_inserted_count >= 1
+    {
         state.current_tool = CanvasTool::Brush;
         if state.is_overlay_mode {
             state.command_queue.push(AppCommand::UpdateCursorHittest);
         }
+    } else if !state.continuous_insert {
+        // The insertion window stays open: require an explicit shape pick for
+        // the next insert instead of drawing the same shape again.
+        state.selected_shape_type = None;
+        state.shapes_inserted_count = 0;
     }
 }

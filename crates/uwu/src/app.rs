@@ -478,19 +478,6 @@ error: failed to enable premultiplied alpha for window: {:?}
             render_state.queue.submit(Some(encoder.finish()));
         }
 
-        {
-            #[cfg(feature = "profiling")]
-            profiling::scope!("handle_redraw::gc");
-
-            self.state.canvas.objects.retain(|obj| {
-                if let CanvasObject::Image(img) = obj {
-                    !img.marked_for_deletion
-                } else {
-                    true
-                }
-            });
-        }
-
         surface_texture.present();
 
         if self.state.persistent.show_fps {

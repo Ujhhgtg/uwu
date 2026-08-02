@@ -218,14 +218,6 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             ui.my_label("启动时显示欢迎:");
             ui.checkbox(&mut state.persistent.show_welcome_window_on_start, "");
         });
-
-        ui.horizontal(|ui| {
-            ui.my_label("窗口透明度");
-            ui.add(egui::Slider::new(
-                &mut state.persistent.window_opacity,
-                0.0..=1.0,
-            ));
-        });
     });
 
     collapsing(ui, "drawing", "绘制", |ui| {
@@ -389,6 +381,11 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         ui.horizontal(|ui| {
             ui.my_label("低延迟模式:");
             ui.checkbox(&mut state.persistent.low_latency_mode, "");
+        });
+
+        ui.horizontal(|ui| {
+            ui.my_label("插入后保持插入窗口:");
+            ui.checkbox(&mut state.persistent.keep_insertion_window_open, "");
         });
 
         #[cfg(windows)]
@@ -1627,7 +1624,6 @@ fn ui_toolbar_tools_content(
                                 pos: Pos2::new(100.0, 100.0),
                                 size: egui::vec2(target_width, target_height),
                                 aspect_ratio,
-                                marked_for_deletion: false,
 
                                 image_data,
                                 image_size: [width, height],
@@ -1638,9 +1634,11 @@ fn ui_toolbar_tools_content(
                                 .save_add_object(index, CanvasObject::Image(new_image.clone()));
                             state.canvas.objects.push(CanvasObject::Image(new_image));
 
-                            state.current_tool = CanvasTool::Select;
-                            if state.is_overlay_mode {
-                                state.command_queue.push(AppCommand::UpdateCursorHittest);
+                            if !state.persistent.keep_insertion_window_open {
+                                state.current_tool = CanvasTool::Select;
+                                if state.is_overlay_mode {
+                                    state.command_queue.push(AppCommand::UpdateCursorHittest);
+                                }
                             }
                         }
                         Err(err) => {
@@ -1756,9 +1754,11 @@ fn ui_toolbar_tools_content(
                             .history
                             .save_add_object(index, CanvasObject::Text(new_text.clone()));
                         state.canvas.objects.push(CanvasObject::Text(new_text));
-                        state.current_tool = CanvasTool::Select;
-                        if state.is_overlay_mode {
-                            state.command_queue.push(AppCommand::UpdateCursorHittest);
+                        if !state.persistent.keep_insertion_window_open {
+                            state.current_tool = CanvasTool::Select;
+                            if state.is_overlay_mode {
+                                state.command_queue.push(AppCommand::UpdateCursorHittest);
+                            }
                         }
                         state.new_text_content.clear();
                     }
