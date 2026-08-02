@@ -1727,7 +1727,7 @@ fn ui_toolbar_tools_content(
                             color: Color32::WHITE,
                             font_size: 16.0,
 
-                            cached_size: Some(text_size),
+                            cached_size: std::cell::Cell::new(Some(text_size)),
                         };
                         let index = state.canvas.objects.len();
                         state

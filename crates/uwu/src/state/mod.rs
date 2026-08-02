@@ -3,6 +3,7 @@ pub mod flat;
 use egui::{Color32, Pos2, Stroke};
 use egui_notify::Toasts;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -295,7 +296,8 @@ pub struct CanvasText {
     pub pos: Pos2,
     pub color: Color32,
     pub font_size: f32,
-    pub cached_size: Option<egui::Vec2>,
+    /// Real laid-out size in canvas coordinates, cached by `paint`.
+    pub cached_size: Cell<Option<egui::Vec2>>,
 }
 
 impl CanvasObjectOps for CanvasText {
@@ -319,7 +321,7 @@ impl CanvasObjectOps for CanvasText {
             | TransformHandle::BottomRight => {
                 let scale_factor = 1.0 + (delta.x + delta.y) / 200.0;
                 self.font_size = (self.font_size * scale_factor).max(6.0);
-                self.cached_size = None;
+                self.cached_size.set(None);
             }
         }
     }
@@ -327,11 +329,23 @@ impl CanvasObjectOps for CanvasText {
     /// Returns the bounding rectangle for the text
     #[cfg_attr(feature = "profiling", profiling::function)]
     fn bounding_box(&self) -> egui::Rect {
-        if let Some(size) = self.cached_size {
+        if let Some(size) = self.cached_size.get() {
             egui::Rect::from_min_size(self.pos, size)
         } else {
-            let approx_char_width = self.font_size * 0.6;
-            let approx_width = self.text.len() as f32 * approx_char_width;
+            // Fallback until the first paint caches the real galley size.
+            // CJK glyphs are full-width; Latin glyphs roughly 0.6em.
+            // (text.len() counts bytes, which would overestimate CJK ~3x.)
+            let approx_width: f32 = self
+                .text
+                .chars()
+                .map(|c| {
+                    if (c as u32) >= 0x2E80 {
+                        self.font_size
+                    } else {
+                        self.font_size * 0.6
+                    }
+                })
+                .sum();
             let approx_height = self.font_size * 1.2;
             egui::Rect::from_min_size(self.pos, egui::vec2(approx_width, approx_height))
         }
@@ -347,6 +361,9 @@ impl CanvasObjectOps for CanvasText {
             egui::FontId::proportional(zoomed_font_size),
             self.color,
         );
+        // Cache the unzoomed size so hit-testing and selection use the real
+        // text bounds instead of a byte-count approximation.
+        self.cached_size.set(Some(text_galley.size() / zoom));
         let text_shape = egui::epaint::TextShape {
             pos,
             galley: text_galley.clone(),
@@ -1330,7 +1347,7 @@ impl History {
             CanvasObject::Text(text) => {
                 text.pos = transform.pos;
                 text.font_size = transform.size.x;
-                text.cached_size = None;
+                text.cached_size.set(None);
             }
             CanvasObject::Shape(shape) => {
                 shape.pos = transform.pos;
@@ -1861,5 +1878,20 @@ mod tests {
         let size = image.bounding_box().size();
         assert!((size.x / size.y - 2.0).abs() < 0.01);
         assert_eq!(image.pos.x, 0.0);
+    }
+
+    #[test]
+    fn test_text_bounding_box_uses_char_count_not_byte_count() {
+        let text = CanvasText {
+            text: "你好".to_string(),
+            pos: Pos2::new(0.0, 0.0),
+            color: Color32::WHITE,
+            font_size: 20.0,
+            cached_size: std::cell::Cell::new(None),
+        };
+        let bbox = text.bounding_box();
+        // Two CJK chars ≈ 2 * font_size wide. The old byte-count fallback
+        // would have reported ~6 * 0.6 * font_size = 72 px.
+        assert!((bbox.width() - 40.0).abs() < 1.0);
     }
 }

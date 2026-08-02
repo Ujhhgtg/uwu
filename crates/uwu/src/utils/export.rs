@@ -791,14 +791,14 @@ mod tests {
             pos: Pos2::new(200.0, 200.0),
             color: Color32::BLUE,
             font_size: 24.0,
-            cached_size: None,
+            cached_size: std::cell::Cell::new(None),
         }));
         canvas.objects.push(CanvasObject::Text(CanvasText {
             text: "你好，画板".to_string(),
             pos: Pos2::new(200.0, 250.0),
             color: Color32::BLUE,
             font_size: 24.0,
-            cached_size: None,
+            cached_size: std::cell::Cell::new(None),
         }));
 
         // 2x2 RGBA test image

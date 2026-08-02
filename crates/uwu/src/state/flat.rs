@@ -226,7 +226,7 @@ fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> Canvas
             pos: Pos2::new(t.pos[0], t.pos[1]),
             color: Color32::from_rgba_unmultiplied(t.color[0], t.color[1], t.color[2], t.color[3]),
             font_size: t.font_size,
-            cached_size: None,
+            cached_size: std::cell::Cell::new(None),
         }),
         CanvasObjectFlat::Shape(s) => CanvasObject::Shape(CanvasShape {
             shape_type: match s.shape_type {
@@ -694,7 +694,7 @@ mod tests {
             pos: Pos2::new(1.0, 2.0),
             color: Color32::from_rgba_unmultiplied(0, 255, 0, 255),
             font_size: 14.0,
-            cached_size: None,
+            cached_size: std::cell::Cell::new(None),
         });
 
         let flat = canvas_object_to_flat(&text);
