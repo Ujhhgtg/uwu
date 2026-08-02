@@ -1,8 +1,8 @@
 use crate::state::{CanvasObject, CanvasObjectOps, CanvasShapeType, CanvasState, StrokeWidth};
 use egui::{Color32, Pos2, Rect};
-use printpdf::{Color, Op, PdfDocument, Point, Pt, Rgb};
+use printpdf::{Color, Op, PdfDocument, PdfFontHandle, Point, Pt, Rgb, XObjectTransform};
 use std::fs::File;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::Path;
 
 fn color_to_svg_attrs(color: Color32, prefix: &str) -> String {
@@ -28,6 +28,43 @@ fn xml_escape(text: &str) -> String {
     s
 }
 
+const BASE64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(BASE64_ALPHABET[(n >> 18) as usize & 63] as char);
+        out.push(BASE64_ALPHABET[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            BASE64_ALPHABET[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            BASE64_ALPHABET[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn encode_png_bytes(data: &[u8], width: u32, height: u32) -> std::io::Result<Vec<u8>> {
+    let img = image::RgbaImage::from_raw(width, height, data.to_vec()).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid image size")
+    })?;
+    let mut cursor = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(cursor.into_inner())
+}
+
 pub fn export_page_to_svg(
     canvas: &CanvasState,
     canvas_color: Color32,
@@ -36,7 +73,9 @@ pub fn export_page_to_svg(
     let mut page_rect = Rect::NOTHING;
     for obj in &canvas.objects {
         match obj {
-            CanvasObject::Image(_) => {}
+            CanvasObject::Image(img) => {
+                page_rect = page_rect.union(Rect::from_min_size(img.pos, img.size));
+            }
             _ => {
                 page_rect = page_rect.union(obj.bounding_box());
             }
@@ -79,7 +118,18 @@ pub fn export_page_to_svg(
 
     for obj in &canvas.objects {
         match obj {
-            CanvasObject::Image(_) => {}
+            CanvasObject::Image(img) => {
+                if let Ok(png) =
+                    encode_png_bytes(&img.image_data, img.image_size[0], img.image_size[1])
+                {
+                    let href = format!("data:image/png;base64,{}", base64_encode(&png));
+                    writeln!(
+                        file,
+                        r#"  <image x="{}" y="{}" width="{}" height="{}" href="{}" />"#,
+                        img.pos.x, img.pos.y, img.size.x, img.size.y, href
+                    )?;
+                }
+            }
             CanvasObject::Stroke(stroke) => {
                 if stroke.points.is_empty() {
                     continue;
@@ -210,7 +260,7 @@ pub fn export_page_to_svg(
                 let escaped = xml_escape(&text.text);
                 writeln!(
                     file,
-                    r#"  <text x="{}" y="{}" font-size="{}" {} font-family="sans-serif" dominant-baseline="hanging">{}</text>"#,
+                    r#"  <text x="{}" y="{}" font-size="{}" {} font-family="Noto Sans CJK SC, Microsoft YaHei, PingFang SC, sans-serif" dominant-baseline="hanging">{}</text>"#,
                     text.pos.x, text.pos.y, text.font_size, fill_attr, escaped
                 )?;
             }
@@ -238,6 +288,17 @@ pub fn export_all_pages_to_pdf(
     }
 
     let mut doc = PdfDocument::new("Whiteboard Export");
+
+    // Embed a CJK-capable font so Chinese text survives the PDF export. The
+    // font is subset automatically during save (PdfSaveOptions defaults), so
+    // only the glyphs actually used end up in the file.
+    let mut font_warnings: Vec<printpdf::PdfFontParseWarning> = Vec::new();
+    let external_font = crate::assets::try_font_bytes()
+        .and_then(|bytes| printpdf::ParsedFont::from_bytes(&bytes, 0, &mut font_warnings))
+        .map(|font| doc.add_font(&font));
+    if external_font.is_none() {
+        eprintln!("warning: no usable CJK font found, PDF text falls back to Helvetica");
+    }
 
     for (_page_idx, canvas) in pages.iter().enumerate() {
         let bbox = get_page_bbox(canvas);
@@ -300,7 +361,29 @@ pub fn export_all_pages_to_pdf(
 
         for obj in &canvas.objects {
             match obj {
-                CanvasObject::Image(_) => {}
+                CanvasObject::Image(img) => {
+                    let raw_image = printpdf::RawImage {
+                        width: img.image_size[0] as usize,
+                        height: img.image_size[1] as usize,
+                        data_format: printpdf::RawImageFormat::RGBA8,
+                        pixels: printpdf::RawImageData::U8(img.image_data.to_vec()),
+                        tag: Vec::new(),
+                    };
+                    let image_id = doc.add_image(&raw_image);
+                    ops.push(Op::UseXobject {
+                        id: image_id,
+                        transform: XObjectTransform {
+                            // dpi = 72 maps 1 image pixel to 1 pt before scaling,
+                            // so scale_x/y place the image at its canvas size.
+                            translate_x: Some(Pt(img.pos.x - bbox.min.x)),
+                            translate_y: Some(Pt(bbox.max.y - (img.pos.y + img.size.y))),
+                            scale_x: Some(img.size.x / img.image_size[0] as f32),
+                            scale_y: Some(img.size.y / img.image_size[1] as f32),
+                            dpi: Some(72.0),
+                            ..Default::default()
+                        },
+                    });
+                }
                 CanvasObject::Stroke(stroke) => {
                     if stroke.points.is_empty() {
                         continue;
@@ -586,7 +669,12 @@ pub fn export_all_pages_to_pdf(
                     let y_pt = Pt(bbox.max.y - text_y);
 
                     ops.push(Op::SetFont {
-                        font: printpdf::PdfFontHandle::Builtin(printpdf::BuiltinFont::Helvetica),
+                        font: match &external_font {
+                            Some(font_id) => PdfFontHandle::External(font_id.clone()),
+                            None => {
+                                printpdf::PdfFontHandle::Builtin(printpdf::BuiltinFont::Helvetica)
+                            }
+                        },
                         size: Pt(text.font_size),
                     });
                     ops.push(Op::SetTextCursor {
@@ -615,7 +703,9 @@ fn get_page_bbox(canvas: &CanvasState) -> Rect {
     let mut page_rect = Rect::NOTHING;
     for obj in &canvas.objects {
         match obj {
-            CanvasObject::Image(_) => {}
+            CanvasObject::Image(img) => {
+                page_rect = page_rect.union(Rect::from_min_size(img.pos, img.size));
+            }
             _ => {
                 page_rect = page_rect.union(obj.bounding_box());
             }
@@ -671,7 +761,7 @@ fn push_pdf_circle_ops(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{CanvasObject, CanvasShape, CanvasStroke, CanvasText};
+    use crate::state::{CanvasImage, CanvasObject, CanvasShape, CanvasStroke, CanvasText};
     use egui::Color32;
 
     #[test]
@@ -703,6 +793,30 @@ mod tests {
             font_size: 24.0,
             cached_size: None,
         }));
+        canvas.objects.push(CanvasObject::Text(CanvasText {
+            text: "你好，画板".to_string(),
+            pos: Pos2::new(200.0, 250.0),
+            color: Color32::BLUE,
+            font_size: 24.0,
+            cached_size: None,
+        }));
+
+        // 2x2 RGBA test image
+        let ctx = egui::Context::default();
+        let rgba = vec![
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+        ];
+        let color_image = egui::ColorImage::from_rgba_unmultiplied([2, 2], &rgba);
+        let texture = ctx.load_texture("test_image", color_image, egui::TextureOptions::LINEAR);
+        canvas.objects.push(CanvasObject::Image(CanvasImage {
+            texture,
+            pos: Pos2::new(50.0, 50.0),
+            size: egui::Vec2::new(40.0, 40.0),
+            aspect_ratio: 1.0,
+            marked_for_deletion: false,
+            image_data: rgba.into(),
+            image_size: [2, 2],
+        }));
 
         let temp_dir = std::env::temp_dir();
         let svg_path = temp_dir.join("test_output.svg");
@@ -716,6 +830,9 @@ mod tests {
         assert!(svg_data.contains("<svg"));
         assert!(svg_data.contains("rect"));
         assert!(svg_data.contains("Hello World"));
+        assert!(svg_data.contains("你好，画板"));
+        assert!(svg_data.contains("<image"));
+        assert!(svg_data.contains("data:image/png;base64,"));
 
         // Test PDF export
         let res_pdf = export_all_pages_to_pdf(&[&canvas], Color32::WHITE, &pdf_path);
@@ -723,6 +840,15 @@ mod tests {
         assert!(pdf_path.exists());
         let pdf_data = std::fs::read(&pdf_path).unwrap();
         assert!(!pdf_data.is_empty());
+        // When a CJK system font is available the PDF must embed it (subset
+        // as FontFile2 for TrueType or FontFile3 for CFF). CI machines without
+        // CJK fonts fall back to Helvetica, so only assert when a font exists.
+        if crate::assets::try_font_bytes().is_some() {
+            let has_font_file = pdf_data
+                .windows(9)
+                .any(|w| w == b"FontFile2" || w == b"FontFile3");
+            assert!(has_font_file, "PDF should embed a CJK font");
+        }
 
         // Clean up
         let _ = std::fs::remove_file(svg_path);

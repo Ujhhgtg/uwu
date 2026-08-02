@@ -44,7 +44,7 @@ image = { version = "*", default-features = false, features = [
 ] }
 ttf-parser = "*"
 rfd = "*"
-printpdf = "0.9"
+printpdf = { version = "0.9", features = ["images"] }
 
 
 # serialization

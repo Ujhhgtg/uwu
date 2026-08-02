@@ -8,10 +8,18 @@ pub const EMBEDDED_FONT: &[u8] = include_bytes!("../assets/fonts/noto-sans-cjk-s
 pub fn font_bytes() -> &'static [u8] {
     static FONT: OnceLock<Vec<u8>> = OnceLock::new();
 
+    FONT.get_or_init(|| try_font_bytes().unwrap_or_else(|| panic!("cannot find cjk font")))
+}
+
+/// Returns the CJK font bytes when one is available, or `None` if neither an
+/// embedded font nor a matching system font could be found.
+pub fn try_font_bytes() -> Option<Vec<u8>> {
+    static FONT: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+
     FONT.get_or_init(|| {
         #[cfg(feature = "embedded_font")]
         {
-            EMBEDDED_FONT.to_vec()
+            return Some(EMBEDDED_FONT.to_vec());
         }
 
         #[cfg(feature = "system_font")]
@@ -60,13 +68,19 @@ pub fn font_bytes() -> &'static [u8] {
                     font_db.with_face_data(face_id, |data, _| Some(data.to_vec()))
                     && let Some(font_bytes) = font_data
                 {
-                    return font_bytes;
+                    return Some(font_bytes);
                 }
             }
 
-            panic!("cannot find cjk font")
+            None
+        }
+
+        #[cfg(not(any(feature = "embedded_font", feature = "system_font")))]
+        {
+            None
         }
     })
+    .clone()
 }
 
 #[cfg(all(feature = "embedded_font", feature = "system_font"))]
