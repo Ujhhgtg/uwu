@@ -80,12 +80,15 @@ pub fn brush_stroke_add_point(
         }
     }
 
-    if active_stroke.points.is_empty() || active_stroke.points.last().unwrap().distance(pos) > 1.0 {
+    // Sample in screen space: a fixed canvas-space threshold would add far too
+    // few points when zoomed in and too many when zoomed out.
+    let screen_distance = active_stroke.points.last().unwrap().distance(pos) * state.view_zoom;
+    if active_stroke.points.is_empty() || screen_distance > 1.0 {
         let speed = if !active_stroke.points.is_empty() && !active_stroke.times.is_empty() {
             let last_time = active_stroke.times.last().unwrap();
             let time_delta = ((current_time - last_time) as f32).max(0.001);
-            let distance = active_stroke.points.last().unwrap().distance(pos);
-            Some(distance / time_delta)
+            // Speed-based width is defined in screen pixels per second.
+            Some(screen_distance / time_delta)
         } else {
             None
         };

@@ -2040,9 +2040,16 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 if points.len() < 2 {
                     continue;
                 }
+                // Simplify in canvas space (bounding screen deviation to a few
+                // pixels) before triangulating: the raw lasso can have
+                // thousands of points and triangulation is O(n²).
+                let simplified = utils::simplify_polygon(points, 4.0 / zoom);
+
                 // Convert canvas-coord points to screen coords
-                let screen_pts: Vec<Pos2> =
-                    points.iter().map(|p| (*p - view_offset) * zoom).collect();
+                let screen_pts: Vec<Pos2> = simplified
+                    .iter()
+                    .map(|p| (*p - view_offset) * zoom)
+                    .collect();
 
                 // Draw filled polygon via triangulation
                 if screen_pts.len() >= 3 {
