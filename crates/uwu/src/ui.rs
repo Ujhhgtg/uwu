@@ -848,21 +848,14 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
         }
 
         if state.toolbar_exit_confirm_at.is_some() {
-            // Second stage: red 确定 exits, green 取消 restores the buttons.
-            if ui
-                .add(egui::Button::new(
-                    egui::RichText::new("确定").color(Color32::RED),
-                ))
-                .clicked()
-            {
+            // Second stage: red 确定 exits, plain 取消 restores the buttons.
+            let confirm_button =
+                egui::Button::new(egui::RichText::new("确定").color(Color32::WHITE))
+                    .fill(Color32::from_rgb(178, 34, 34));
+            if ui.add(confirm_button).clicked() {
                 state.should_quit = true;
             }
-            if ui
-                .add(egui::Button::new(
-                    egui::RichText::new("取消").color(Color32::GREEN),
-                ))
-                .clicked()
-            {
+            if ui.button("取消").clicked() {
                 state.toolbar_exit_confirm_at = None;
             }
         } else {
