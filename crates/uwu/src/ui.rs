@@ -728,6 +728,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                         color: STRESS_COLOR,
                         base_width: STRESS_WIDTH,
                         shape: None,
+                        cached_bbox: std::cell::Cell::new(None),
                     };
 
                     state.canvas.objects.push(CanvasObject::Stroke(stroke));
@@ -1476,6 +1477,7 @@ fn ui_toolbar_tools_content(
                                 color: old_color,
                                 base_width: state.brush_width,
                                 shape: None,
+                                cached_bbox: std::cell::Cell::new(None),
                             }));
                     }
                 }
@@ -2778,6 +2780,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                             color: stroke.color,
                                             base_width: stroke.base_width,
                                             shape: None,
+                                            cached_bbox: std::cell::Cell::new(None),
                                         });
                                     }
                                     current_points = vec![p2];
@@ -2792,6 +2795,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                     color: stroke.color,
                                     base_width: stroke.base_width,
                                     shape: None,
+                                    cached_bbox: std::cell::Cell::new(None),
                                 });
                             }
                         }
@@ -2877,6 +2881,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             color: state.brush_color,
                             base_width: state.brush_width,
                             shape: None,
+                            cached_bbox: std::cell::Cell::new(None),
                         };
                         let index = state.canvas.objects.len();
                         state

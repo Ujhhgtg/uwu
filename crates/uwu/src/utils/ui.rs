@@ -240,6 +240,7 @@ pub fn create_shape_object(
                 color: Color32::WHITE,
                 base_width: 3.0,
                 shape: Some(CanvasShapeType::Line),
+                cached_bbox: std::cell::Cell::new(None),
             };
             let idx = state.canvas.objects.len();
             state
@@ -271,6 +272,7 @@ pub fn create_shape_object(
                     color: Color32::WHITE,
                     base_width: 3.0,
                     shape: Some(CanvasShapeType::Arrow),
+                    cached_bbox: std::cell::Cell::new(None),
                 };
                 let idx = state.canvas.objects.len();
                 state
@@ -293,6 +295,7 @@ pub fn create_shape_object(
                 color: Color32::WHITE,
                 base_width: 3.0,
                 shape: Some(CanvasShapeType::Rectangle),
+                cached_bbox: std::cell::Cell::new(None),
             };
             let idx = state.canvas.objects.len();
             state
@@ -313,6 +316,7 @@ pub fn create_shape_object(
                 color: Color32::WHITE,
                 base_width: 3.0,
                 shape: Some(CanvasShapeType::Triangle),
+                cached_bbox: std::cell::Cell::new(None),
             };
             let idx = state.canvas.objects.len();
             state

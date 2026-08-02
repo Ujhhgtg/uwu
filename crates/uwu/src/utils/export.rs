@@ -775,6 +775,7 @@ mod tests {
             color: Color32::RED,
             base_width: 3.0,
             shape: None,
+            cached_bbox: std::cell::Cell::new(None),
         }));
 
         // 2. Add a Shape (Rectangle)

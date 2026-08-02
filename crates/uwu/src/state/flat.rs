@@ -220,6 +220,7 @@ fn object_to_canvas_object(obj: CanvasObjectFlat, ctx: &egui::Context) -> Canvas
                 ShapeTypeFlat::Triangle => CanvasShapeType::Triangle,
                 ShapeTypeFlat::Circle => CanvasShapeType::Circle,
             }),
+            cached_bbox: std::cell::Cell::new(None),
         }),
         CanvasObjectFlat::Text(t) => CanvasObject::Text(CanvasText {
             text: t.text,
@@ -733,6 +734,7 @@ mod tests {
             color: Color32::WHITE,
             base_width: 3.0,
             shape: Some(CanvasShapeType::Rectangle),
+            cached_bbox: std::cell::Cell::new(None),
         });
 
         let flat = canvas_object_to_flat(&stroke);
@@ -847,6 +849,7 @@ mod tests {
             color: Color32::WHITE,
             base_width: 3.0,
             shape: Some(CanvasShapeType::Rectangle),
+            cached_bbox: std::cell::Cell::new(None),
         });
         let page = PageState {
             canvas: CanvasState {

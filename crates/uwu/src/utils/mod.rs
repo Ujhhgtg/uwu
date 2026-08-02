@@ -491,6 +491,7 @@ pub fn rasterize_text(
                     color: text.color,
                     base_width: text.font_size,
                     shape: None,
+                    cached_bbox: std::cell::Cell::new(None),
                 });
             }
 

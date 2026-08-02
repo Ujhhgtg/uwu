@@ -583,6 +583,7 @@ impl CanvasObject {
                 for point in &mut stroke.points {
                     *point += delta;
                 }
+                stroke.cached_bbox.set(None);
             }
         }
     }
@@ -915,6 +916,9 @@ pub struct CanvasStroke {
     pub color: Color32,
     pub base_width: f32,
     pub shape: Option<CanvasShapeType>,
+    /// Cached bounding box in canvas coordinates, recomputed lazily and
+    /// invalidated whenever the stroke geometry changes.
+    pub cached_bbox: std::cell::Cell<Option<egui::Rect>>,
 }
 
 impl CanvasObjectOps for CanvasStroke {
@@ -926,6 +930,7 @@ impl CanvasObjectOps for CanvasStroke {
         _drag_start: Pos2,
         current_pos: Pos2,
     ) {
+        self.cached_bbox.set(None);
         let bbox = self.bounding_box();
         if bbox.width() < 1.0 || bbox.height() < 1.0 {
             return;
@@ -972,6 +977,10 @@ impl CanvasObjectOps for CanvasStroke {
 
     #[cfg_attr(feature = "profiling", profiling::function)]
     fn bounding_box(&self) -> egui::Rect {
+        if let Some(rect) = self.cached_bbox.get() {
+            return rect;
+        }
+
         if self.points.is_empty() {
             return egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO);
         }
@@ -993,10 +1002,12 @@ impl CanvasObjectOps for CanvasStroke {
         let max_width = self.width.max_width();
         let padding = max_width / 2.0 + 5.0; // 添加额外的5像素边距
 
-        egui::Rect::from_min_max(
+        let rect = egui::Rect::from_min_max(
             Pos2::new(min_x - padding, min_y - padding),
             Pos2::new(max_x + padding, max_y + padding),
-        )
+        );
+        self.cached_bbox.set(Some(rect));
+        rect
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]
@@ -1439,6 +1450,7 @@ impl History {
                     }
                 }
                 stroke.base_width = (stroke.base_width * avg_scale).max(1.0);
+                stroke.cached_bbox.set(None);
             }
         }
     }
@@ -1997,5 +2009,25 @@ mod tests {
         // A second request inside the timeout window confirms the exit.
         assert!(state.request_exit("再次按 Esc 确认退出"));
         assert!(state.exit_confirm_armed_at.is_none());
+    }
+
+    #[test]
+    fn test_stroke_bbox_cache_invalidates_on_move() {
+        let stroke = CanvasStroke {
+            points: vec![Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0)],
+            width: StrokeWidth::Fixed(3.0),
+            color: Color32::WHITE,
+            base_width: 3.0,
+            shape: None,
+            cached_bbox: std::cell::Cell::new(None),
+        };
+        let mut object = CanvasObject::Stroke(stroke);
+
+        let before = object.bounding_box();
+        CanvasObject::move_object(&mut object, egui::vec2(100.0, 0.0));
+        let after = object.bounding_box();
+
+        assert_eq!(after.min.x, before.min.x + 100.0);
+        assert_eq!(after.min.y, before.min.y);
     }
 }

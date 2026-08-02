@@ -158,6 +158,7 @@ pub fn brush_stroke_end(state: &mut AppState, pointer_id: u64) {
         color: state.brush_color,
         base_width: state.brush_width,
         shape: None,
+        cached_bbox: std::cell::Cell::new(None),
     };
     let index = state.canvas.objects.len();
     state
