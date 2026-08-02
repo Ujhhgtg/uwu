@@ -4,7 +4,7 @@ use egui::{Color32, Pos2, Stroke};
 use egui_notify::Toasts;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1223,16 +1223,16 @@ pub struct ObjectTransform {
 // 历史记录结构
 #[derive(Debug, Clone)]
 pub struct History {
-    pub undo_stack: Vec<HistoryCommand>,
-    pub redo_stack: Vec<HistoryCommand>,
+    pub undo_stack: VecDeque<HistoryCommand>,
+    pub redo_stack: VecDeque<HistoryCommand>,
     pub max_history_size: usize,
 }
 
 impl History {
     pub fn new(max_history_size: usize) -> Self {
         Self {
-            undo_stack: Vec::with_capacity(max_history_size),
-            redo_stack: Vec::with_capacity(max_history_size),
+            undo_stack: VecDeque::with_capacity(max_history_size),
+            redo_stack: VecDeque::with_capacity(max_history_size),
             max_history_size,
         }
     }
@@ -1295,20 +1295,20 @@ impl History {
 
     // 推送命令并维护历史记录大小
     pub(crate) fn push_command(&mut self, command: HistoryCommand) {
-        self.undo_stack.push(command);
+        self.undo_stack.push_back(command);
         self.redo_stack.clear();
 
         // 清理超出限制的历史记录
         if self.undo_stack.len() > self.max_history_size {
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front();
         }
     }
 
     // 执行撤销操作
     pub fn undo(&mut self, current_state: &mut CanvasState) -> bool {
-        if let Some(command) = self.undo_stack.pop() {
+        if let Some(command) = self.undo_stack.pop_back() {
             self.apply_reverse(&command, current_state);
-            self.redo_stack.push(command);
+            self.redo_stack.push_back(command);
             true
         } else {
             false
@@ -1317,9 +1317,9 @@ impl History {
 
     // 执行重做操作
     pub fn redo(&mut self, current_state: &mut CanvasState) -> bool {
-        if let Some(command) = self.redo_stack.pop() {
+        if let Some(command) = self.redo_stack.pop_back() {
             self.apply_forward(&command, current_state);
-            self.undo_stack.push(command);
+            self.undo_stack.push_back(command);
             true
         } else {
             false
@@ -1458,7 +1458,7 @@ impl History {
 
 impl Default for History {
     fn default() -> Self {
-        Self::new(50)
+        Self::new(100)
     }
 }
 
@@ -1803,6 +1803,11 @@ mod tests {
         }
 
         assert_eq!(history.undo_stack.len(), 2);
+    }
+
+    #[test]
+    fn test_history_default_limit_is_100() {
+        assert_eq!(History::default().max_history_size, 100);
     }
 
     /// Mirrors the command sequence the UI pushes for "置顶" (bring to front):

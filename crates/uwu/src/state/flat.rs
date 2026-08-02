@@ -559,7 +559,7 @@ impl PageState {
                     .into_iter()
                     .map(|cmd| history_command_to_runtime(cmd, ctx))
                     .collect(),
-                max_history_size: 50,
+                max_history_size: 100,
             },
             view_offset: egui::Vec2::new(flat.view_offset[0], flat.view_offset[1]),
             view_zoom: flat.view_zoom,
@@ -682,6 +682,7 @@ mod tests {
     use super::*;
     use crate::state::{CanvasShape, CanvasShapeType};
     use egui::{Color32, Pos2};
+    use std::collections::VecDeque;
 
     #[test]
     fn test_canvas_object_to_flat_shape() {
@@ -759,7 +760,7 @@ mod tests {
             })
         };
         let history = History {
-            undo_stack: vec![
+            undo_stack: VecDeque::from(vec![
                 HistoryCommand::BatchCommand {
                     commands: vec![
                         HistoryCommand::RemoveObject {
@@ -776,8 +777,8 @@ mod tests {
                     old: vec![obj(CanvasShapeType::Line)],
                     new: vec![obj(CanvasShapeType::Arrow), obj(CanvasShapeType::Circle)],
                 },
-            ],
-            redo_stack: vec![HistoryCommand::BatchCommand {
+            ]),
+            redo_stack: VecDeque::from(vec![HistoryCommand::BatchCommand {
                 commands: vec![
                     HistoryCommand::RemoveObject {
                         index: 2,
@@ -788,7 +789,7 @@ mod tests {
                         object: obj(CanvasShapeType::Triangle),
                     },
                 ],
-            }],
+            }]),
             max_history_size: 50,
         };
 
@@ -856,11 +857,11 @@ mod tests {
                 objects: vec![stroke],
             },
             history: History {
-                undo_stack: vec![HistoryCommand::ReplaceObjects {
+                undo_stack: VecDeque::from(vec![HistoryCommand::ReplaceObjects {
                     old: Vec::new(),
                     new: Vec::new(),
-                }],
-                redo_stack: Vec::new(),
+                }]),
+                redo_stack: VecDeque::new(),
                 max_history_size: 50,
             },
             view_offset: egui::Vec2::new(1.0, 2.0),
