@@ -742,13 +742,17 @@ impl ApplicationHandler<()> for App {
                             }
                         }
                         CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
+                            let original_objects = self.state.canvas.objects.clone();
                             self.state.pointers.insert(
                                 id,
                                 PointerState {
                                     id,
                                     pos,
                                     prev_pos: None,
-                                    interaction: PointerInteraction::Erasing,
+                                    interaction: PointerInteraction::Erasing {
+                                        original_objects,
+                                        modified: false,
+                                    },
                                 },
                             );
                         }
@@ -1004,8 +1008,11 @@ impl ApplicationHandler<()> for App {
                                 }
                             }
                         }
-                        CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
+                        CanvasTool::ObjectEraser => {
                             self.state.pointers.remove(&id);
+                        }
+                        CanvasTool::PixelEraser => {
+                            self.state.finish_pixel_erasing(id);
                         }
                         CanvasTool::Insert => {
                             if let Some(pointer) = self.state.pointers.remove(&id)

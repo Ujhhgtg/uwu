@@ -1049,7 +1049,12 @@ pub enum PointerInteraction {
         drag_original_transforms: Vec<(usize, ObjectTransform)>,
         drag_accumulated_delta: egui::Vec2,
     },
-    Erasing,
+    Erasing {
+        /// Snapshot of the full object list taken when the eraser gesture started.
+        original_objects: Vec<CanvasObject>,
+        /// Whether any stroke was actually modified or removed during this gesture.
+        modified: bool,
+    },
     ShapeInsert {
         start_pos: Pos2,
         shape_type: CanvasShapeType,
@@ -1112,6 +1117,11 @@ pub enum HistoryCommand {
     },
     BatchCommand {
         commands: Vec<HistoryCommand>,
+    },
+    // Replaces the whole object list (used by pixel eraser gestures).
+    ReplaceObjects {
+        old: Vec<CanvasObject>,
+        new: Vec<CanvasObject>,
     },
 }
 
@@ -1266,6 +1276,9 @@ impl History {
                     self.apply_reverse(cmd, current_state);
                 }
             }
+            HistoryCommand::ReplaceObjects { old, new: _ } => {
+                current_state.objects = old.clone();
+            }
         }
     }
 
@@ -1306,6 +1319,9 @@ impl History {
                 for cmd in commands.iter() {
                     self.apply_forward(cmd, current_state);
                 }
+            }
+            HistoryCommand::ReplaceObjects { old: _, new } => {
+                current_state.objects = new.clone();
             }
         }
     }
@@ -1583,6 +1599,29 @@ impl AppState {
         self.selected_object_indices.clear();
     }
 
+    /// Ends a pixel-eraser gesture: removes the pointer and records a single
+    /// history command covering every change made since the gesture started.
+    pub fn finish_pixel_erasing(&mut self, pointer_id: u64) {
+        let Some(pointer) = self.pointers.remove(&pointer_id) else {
+            return;
+        };
+        let PointerInteraction::Erasing {
+            original_objects,
+            modified,
+        } = pointer.interaction
+        else {
+            return;
+        };
+        if modified {
+            let new_objects = std::mem::take(&mut self.canvas.objects);
+            self.history.push_command(HistoryCommand::ReplaceObjects {
+                old: original_objects,
+                new: new_objects.clone(),
+            });
+            self.canvas.objects = new_objects;
+        }
+    }
+
     pub fn toggle_selection(&mut self, index: usize) {
         if self.is_selected(index) {
             self.selected_object_indices.retain(|&i| i != index);
@@ -1746,5 +1785,41 @@ mod tests {
         assert!(history.redo(&mut state));
         assert_eq!(obj_debug(&state.objects[0..1]), obj_debug(&objs[2..3]));
         assert_eq!(obj_debug(&state.objects[1..2]), obj_debug(&objs[3..4]));
+    }
+
+    #[test]
+    fn test_pixel_erasing_finish_records_single_replace_command() {
+        let mut state = AppState::default();
+        let original = CanvasState {
+            objects: vec![create_dummy_object(), create_dummy_object()],
+        };
+        state.canvas = original.clone();
+        state.pointers.insert(
+            42,
+            PointerState {
+                id: 42,
+                pos: Pos2::ZERO,
+                prev_pos: None,
+                interaction: PointerInteraction::Erasing {
+                    original_objects: original.objects.clone(),
+                    modified: true,
+                },
+            },
+        );
+
+        // Simulate the eraser shrinking the object list during the gesture.
+        state.canvas.objects.pop();
+
+        state.finish_pixel_erasing(42);
+
+        // Exactly one command, covering the whole gesture.
+        assert_eq!(state.history.undo_stack.len(), 1);
+        assert!(state.pointers.is_empty());
+
+        // Undo restores the pre-gesture snapshot; redo reapplies the result.
+        assert!(state.history.undo(&mut state.canvas));
+        assert_eq!(state.canvas.objects.len(), original.objects.len());
+        assert!(state.history.redo(&mut state.canvas));
+        assert_eq!(state.canvas.objects.len(), original.objects.len() - 1);
     }
 }

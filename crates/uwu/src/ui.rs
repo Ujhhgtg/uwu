@@ -2517,7 +2517,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     state
                         .pointers
                         .values()
-                        .filter(|p| matches!(p.interaction, PointerInteraction::Erasing))
+                        .filter(|p| matches!(p.interaction, PointerInteraction::Erasing { .. }))
                         .map(|p| p.pos)
                         .collect()
                 } else if response.drag_started() || response.clicked() || response.dragged() {
@@ -2571,32 +2571,36 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 if !has_touch {
                     if response.drag_started() || response.clicked() {
                         if let Some(pos) = canvas_pos {
+                            let original_objects = state.canvas.objects.clone();
                             state.pointers.insert(
                                 0,
                                 PointerState {
                                     id: 0,
                                     pos,
                                     prev_pos: None,
-                                    interaction: PointerInteraction::Erasing,
+                                    interaction: PointerInteraction::Erasing {
+                                        original_objects,
+                                        modified: false,
+                                    },
                                 },
                             );
                         }
                     } else if response.dragged() {
                         if let Some(pointer) = state.pointers.get_mut(&0)
-                            && matches!(pointer.interaction, PointerInteraction::Erasing)
+                            && matches!(pointer.interaction, PointerInteraction::Erasing { .. })
                             && let Some(pos) = canvas_pos
                         {
                             pointer.pos = pos;
                         }
                     } else {
-                        state.pointers.remove(&0);
+                        state.finish_pixel_erasing(0);
                     }
                 }
 
                 let eraser_positions: Vec<Pos2> = {
                     let mut positions = Vec::new();
                     for pointer in state.pointers.values() {
-                        if !matches!(pointer.interaction, PointerInteraction::Erasing) {
+                        if !matches!(pointer.interaction, PointerInteraction::Erasing { .. }) {
                             continue;
                         }
                         if let Some(prev) = pointer.prev_pos {
@@ -2616,7 +2620,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 };
 
                 for pointer in state.pointers.values() {
-                    if matches!(pointer.interaction, PointerInteraction::Erasing) {
+                    if matches!(pointer.interaction, PointerInteraction::Erasing { .. }) {
                         utils::draw_size_preview(
                             painter,
                             (pointer.pos - view_offset) * zoom,
@@ -2625,6 +2629,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     }
                 }
 
+                let mut any_modified = false;
                 for pos in eraser_positions {
                     let eraser_radius = state.eraser_size / 2.0;
                     let eraser_rect = egui::Rect::from_center_size(
@@ -2732,30 +2737,15 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     }
 
                     if strokes_modified {
-                        let original_stroke_count = state
+                        any_modified = true;
+                        let non_strokes: Vec<_> = state
                             .canvas
                             .objects
                             .iter()
-                            .filter(|obj| matches!(obj, CanvasObject::Stroke(_)))
-                            .count();
-                        let new_stroke_count = new_strokes.len();
-                        if original_stroke_count != new_stroke_count {
-                            let non_strokes: Vec<_> = state
-                                .canvas
-                                .objects
-                                .iter()
-                                .filter(|obj| !matches!(obj, CanvasObject::Stroke(_)))
-                                .cloned()
-                                .collect();
-                            let old_objects = std::mem::take(&mut state.canvas.objects);
-                            state.history.save_clear_objects(old_objects);
-                            state.canvas.objects = non_strokes;
-                        } else {
-                            state
-                                .canvas
-                                .objects
-                                .retain(|obj| !matches!(obj, CanvasObject::Stroke(_)));
-                        }
+                            .filter(|obj| !matches!(obj, CanvasObject::Stroke(_)))
+                            .cloned()
+                            .collect();
+                        state.canvas.objects = non_strokes;
 
                         for stroke in new_strokes {
                             state.canvas.objects.push(CanvasObject::Stroke(stroke));
@@ -2763,8 +2753,18 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     }
                 }
 
+                if any_modified {
+                    for pointer in state.pointers.values_mut() {
+                        if let PointerInteraction::Erasing { modified, .. } =
+                            &mut pointer.interaction
+                        {
+                            *modified = true;
+                        }
+                    }
+                }
+
                 for pointer in state.pointers.values_mut() {
-                    if matches!(pointer.interaction, PointerInteraction::Erasing) {
+                    if matches!(pointer.interaction, PointerInteraction::Erasing { .. }) {
                         pointer.prev_pos = Some(pointer.pos);
                     }
                 }

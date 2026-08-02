@@ -277,6 +277,8 @@ fn history_command_to_flat(cmd: &HistoryCommand) -> Option<HistoryCommandFlat> {
         }),
         // FIXME: batch commands are ignored
         HistoryCommand::BatchCommand { .. } => None,
+        // FIXME: replaced in a later commit with a proper flat variant
+        HistoryCommand::ReplaceObjects { .. } => None,
     }
 }
 
