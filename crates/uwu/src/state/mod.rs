@@ -93,6 +93,13 @@ impl StrokeWidth {
             StrokeWidth::Dynamic(v) => Some(v.len()),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            StrokeWidth::Fixed(_) => false,
+            StrokeWidth::Dynamic(v) => v.is_empty(),
+        }
+    }
 }
 
 impl From<f32> for StrokeWidth {
@@ -1038,6 +1045,12 @@ impl FpsCounter {
         }
 
         self.current_fps
+    }
+}
+
+impl Default for FpsCounter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

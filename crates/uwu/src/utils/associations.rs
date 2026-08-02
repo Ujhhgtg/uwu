@@ -135,7 +135,7 @@ Categories=Utility;Graphics;
         .status();
 
     let _ = std::process::Command::new("xdg-mime")
-        .args(&["default", "uwu.desktop", "application/x-owo"])
+        .args(["default", "uwu.desktop", "application/x-owo"])
         .status();
 
     Ok(())
@@ -196,8 +196,8 @@ pub fn check_and_update_linux_desktop_file() {
 
     let mut needs_update = true;
     for line in content.lines() {
-        if line.starts_with("Exec=") {
-            let exec_val = line["Exec=".len()..].trim();
+        if let Some(exec_val) = line.strip_prefix("Exec=") {
+            let exec_val = exec_val.trim();
             if exec_val == format!("{} %f", exe_str) || exec_val == exe_str {
                 needs_update = false;
                 break;

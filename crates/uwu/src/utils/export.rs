@@ -300,7 +300,7 @@ pub fn export_all_pages_to_pdf(
         eprintln!("warning: no usable CJK font found, PDF text falls back to Helvetica");
     }
 
-    for (_page_idx, canvas) in pages.iter().enumerate() {
+    for canvas in pages.iter() {
         let bbox = get_page_bbox(canvas);
         let width_pt = bbox.width();
         let height_pt = bbox.height();

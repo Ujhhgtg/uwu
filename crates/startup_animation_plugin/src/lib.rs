@@ -153,11 +153,24 @@ impl StartupAnimationPlugin {
     }
 }
 
+/// Returns a pointer to a NUL-terminated C string containing the plugin's rustc version.
+///
+/// # Safety
+///
+/// The returned pointer is valid for the lifetime of the loaded library and
+/// must only be read as a C string by the host.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn plugin_rustc_version() -> *const std::ffi::c_char {
     RUSTC_VERSION_CSTR.as_ptr()
 }
 
+/// Constructs and returns a `Box<dyn Plugin>` as a raw fat pointer.
+///
+/// # Safety
+///
+/// The caller assumes ownership of the returned pointer and must eventually
+/// reconstruct the `Box<dyn Plugin>` and drop it. Only call this after a
+/// successful rustc-version check.
 #[unsafe(no_mangle)]
 #[allow(improper_ctypes_definitions)]
 pub unsafe extern "C" fn plugin_create() -> *mut dyn Plugin {

@@ -457,7 +457,7 @@ error: failed to enable premultiplied alpha for window: {:?}
             //     .copied()
             //     .collect::<Vec<u8>>();
 
-            for chunk in pixels.chunks_exact_mut(4) {
+            for chunk in pixels.as_chunks_mut::<4>().0 {
                 chunk.swap(0, 2); // B ↔ R
             }
 
@@ -489,6 +489,12 @@ error: failed to enable premultiplied alpha for window: {:?}
     }
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApplicationHandler<()> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         pollster::block_on(self.create_window(event_loop));
@@ -502,10 +508,10 @@ impl ApplicationHandler<()> for App {
         }
 
         let mut paths_to_open = Vec::new();
-        if let Ok(mut lock) = single_instance::FILES_TO_OPEN.lock() {
-            if !lock.is_empty() {
-                paths_to_open = std::mem::take(&mut *lock);
-            }
+        if let Ok(mut lock) = single_instance::FILES_TO_OPEN.lock()
+            && !lock.is_empty()
+        {
+            paths_to_open = std::mem::take(&mut *lock);
         }
 
         if !paths_to_open.is_empty() {
