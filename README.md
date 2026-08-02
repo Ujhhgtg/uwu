@@ -41,6 +41,9 @@ cargo build --release
 cargo build --release --no-default-features --features profiling
 ```
 
+the `profiling` feature implies `embedded_font`, so the profiling build embeds
+the bundled CJK font and does not depend on system fonts.
+
 ### cross-compiling for windows from linux
 
 #### prepare

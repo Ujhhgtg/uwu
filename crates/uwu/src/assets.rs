@@ -84,4 +84,7 @@ pub fn try_font_bytes() -> Option<Vec<u8>> {
 }
 
 #[cfg(all(feature = "embedded_font", feature = "system_font"))]
-compile_error!("Features 'embedded_font' and 'system_fonts' cannot be enabled together");
+compile_error!("Features 'embedded_font' and 'system_font' cannot be enabled together");
+
+#[cfg(not(any(feature = "embedded_font", feature = "system_font")))]
+compile_error!("One of the 'embedded_font' or 'system_font' features must be enabled");

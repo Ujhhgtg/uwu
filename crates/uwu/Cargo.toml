@@ -11,7 +11,7 @@ license-file = "LICENSE"
 default = ["system_font"]
 embedded_font = []
 system_font = ["fontdb"]
-profiling = ["dep:profiling", "puffin", "puffin_egui"]
+profiling = ["dep:profiling", "puffin", "puffin_egui", "embedded_font"]
 mimalloc = ["dep:mimalloc"]
 
 [dependencies]
