@@ -1541,6 +1541,8 @@ pub struct AppState {
     // cached states
     pub active_backend: Option<Backend>,
     pub cursor_position: PhysicalPosition<f64>,
+    /// Current keyboard modifier state (kept in sync via ModifiersChanged).
+    pub modifiers: winit::keyboard::ModifiersState,
 
     // deferred commands
     pub command_queue: Vec<AppCommand>,
@@ -1609,6 +1611,7 @@ impl Default for AppState {
                 x: 0.0_f64,
                 y: 0.0_f64,
             },
+            modifiers: winit::keyboard::ModifiersState::default(),
             initial_file: None,
             auxiliary_ctx: None,
         }

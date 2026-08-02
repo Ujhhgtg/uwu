@@ -3,7 +3,7 @@ use crate::overlay_toolbar::OverlayToolbar;
 use crate::render::RenderState;
 use crate::state::{
     AppCommand, AppState, CanvasObject, CanvasObjectOps, CanvasTool, HistoryCommand, InsertTab,
-    MarqueeMatchMode, PageState, PointerInteraction, PointerState,
+    MarqueeMatchMode, ObjectTransform, PageState, PointerInteraction, PointerState,
 };
 use crate::ui;
 use crate::utils;
@@ -700,15 +700,38 @@ impl ApplicationHandler<()> for App {
                                 && (self.state.persistent.click_or_drag_to_single_select
                                     || self.state.is_selected(hit))
                             {
-                                // Touch on object: single select and prepare for drag
+                                // Touch on object: select (shift toggles) and prepare for drag
                                 if !self.state.is_selected(hit) {
-                                    self.state.clear_selection();
-                                    self.state.selected_object_indices.push(hit);
+                                    if self.state.modifiers.shift_key() {
+                                        self.state.toggle_selection(hit);
+                                    } else {
+                                        self.state.clear_selection();
+                                        self.state.selected_object_indices.push(hit);
+                                    }
                                 }
                                 let object = &self.state.canvas.objects[hit];
                                 let bbox = object.bounding_box();
-                                let handle = utils::get_transform_handle_at_pos(bbox, pos);
-                                let transforms = vec![(hit, object.get_transform())];
+                                // Resize handles only apply to a single selection,
+                                // matching the mouse path.
+                                let handle = if self.state.selected_object_indices.len() == 1 {
+                                    utils::get_transform_handle_at_pos(bbox, pos)
+                                } else {
+                                    None
+                                };
+                                // Snapshot transforms for every selected object so a
+                                // multi-object drag records one MoveObject each.
+                                let transforms: Vec<(usize, ObjectTransform)> = self
+                                    .state
+                                    .selected_object_indices
+                                    .iter()
+                                    .filter_map(|&i| {
+                                        if i < self.state.canvas.objects.len() {
+                                            Some((i, self.state.canvas.objects[i].get_transform()))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
                                 self.state.pointers.insert(
                                     id,
                                     PointerState {
@@ -725,7 +748,6 @@ impl ApplicationHandler<()> for App {
                                 );
                             } else {
                                 // Touch on empty space: marquee select
-                                self.state.clear_selection();
                                 self.state.pointers.insert(
                                     id,
                                     PointerState {
@@ -945,7 +967,10 @@ impl ApplicationHandler<()> for App {
                                             points.push(*points.first().unwrap());
                                         }
 
-                                        self.state.clear_selection();
+                                        let shift = self.state.modifiers.shift_key();
+                                        if !shift {
+                                            self.state.clear_selection();
+                                        }
 
                                         if points.len() >= 3 {
                                             // Simplify polygon for hit-testing performance
@@ -999,7 +1024,11 @@ impl ApplicationHandler<()> for App {
                                                 .map(|(i, _)| i)
                                                 .collect();
                                             for i in intersecting {
-                                                self.state.selected_object_indices.push(i);
+                                                if shift {
+                                                    self.state.toggle_selection(i);
+                                                } else {
+                                                    self.state.selected_object_indices.push(i);
+                                                }
                                             }
                                         }
                                     }
@@ -1038,6 +1067,9 @@ impl ApplicationHandler<()> for App {
             } => {
                 self.state.cursor_position = position;
                 self.window.as_ref().unwrap().request_redraw();
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.state.modifiers = modifiers.state();
             }
             _ => (),
         }
