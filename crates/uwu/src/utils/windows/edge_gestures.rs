@@ -1,6 +1,6 @@
 use windows::{
-    Win32::Foundation::{HRESULT, HWND},
-    core::{GUID, IUnknown, interface},
+    Win32::Foundation::HWND,
+    core::{GUID, HRESULT, IUnknown, IUnknown_Vtbl, interface},
 };
 
 const DISABLE_TOUCH_SCREEN: GUID = GUID {
@@ -45,7 +45,7 @@ pub unsafe trait IPropertyStore: IUnknown {
     fn Commit(&self) -> HRESULT;
 }
 
-extern "system" {
+unsafe extern "system" {
     pub fn SHGetPropertyStoreForWindow(
         hwnd: HWND,
         riid: *const GUID,
@@ -69,7 +69,7 @@ struct OSVERSIONINFOEXW {
 }
 
 #[link(name = "ntdll")]
-extern "system" {
+unsafe extern "system" {
     fn RtlGetVersion(lpVersionInformation: *mut OSVERSIONINFOEXW) -> i32;
 }
 
@@ -98,11 +98,13 @@ pub fn is_windows_10_or_greater() -> bool {
 
 pub unsafe fn disable_edge_gestures(hwnd: HWND, disable: bool) -> windows::core::Result<()> {
     let mut prop_store: Option<IPropertyStore> = None;
-    let hr = SHGetPropertyStoreForWindow(
-        hwnd,
-        &IID_PROPERTY_STORE,
-        &mut prop_store as *mut Option<IPropertyStore> as *mut _,
-    );
+    let hr = unsafe {
+        SHGetPropertyStoreForWindow(
+            hwnd,
+            &IID_PROPERTY_STORE,
+            &mut prop_store as *mut Option<IPropertyStore> as *mut _,
+        )
+    };
     if hr.is_ok() {
         if let Some(prop_store) = prop_store {
             let key = PROPERTYKEY {
@@ -117,7 +119,9 @@ pub unsafe fn disable_edge_gestures(hwnd: HWND, disable: bool) -> windows::core:
                 bool_val: if disable { -1 } else { 0 }, // VARIANT_TRUE is -1, VARIANT_FALSE is 0
                 padding: [0; 14],
             };
-            prop_store.SetValue(&key, &var).ok()?;
+            unsafe {
+                prop_store.SetValue(&key, &var).ok()?;
+            }
         }
     }
     Ok(())

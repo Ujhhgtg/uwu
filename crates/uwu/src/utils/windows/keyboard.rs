@@ -5,7 +5,7 @@ use windows::{
             CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
         },
     },
-    core::{GUID, HRESULT, IUnknown, Result, interface},
+    core::{GUID, HRESULT, IUnknown, IUnknown_Vtbl, Result, interface},
 };
 
 #[interface("37c994e7-432b-4834-a2f7-dce1f13b834b")]
