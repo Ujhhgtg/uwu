@@ -189,64 +189,60 @@ impl CanvasObjectOps for CanvasImage {
         current_pos: Pos2,
     ) {
         let bbox = self.bounding_box();
+        let old_size = bbox.size().max(egui::vec2(1.0, 1.0));
+        let aspect_ratio = self.aspect_ratio.max(0.01); // width / height
+        const MIN_SIZE: f32 = 10.0;
 
-        match handle {
-            TransformHandle::TopLeft => {
-                let new_min = current_pos;
-                let new_max = bbox.max;
-                let new_size = egui::vec2(
-                    (new_max.x - new_min.x).max(10.0),
-                    (new_max.y - new_min.y).max(10.0),
-                );
-                self.size = new_size;
-                self.pos = new_min;
+        // Desired size from the raw drag, before aspect correction.
+        let (new_min, new_max) = match handle {
+            TransformHandle::TopLeft => (current_pos, bbox.max),
+            TransformHandle::Top => (Pos2::new(bbox.min.x, current_pos.y), bbox.max),
+            TransformHandle::TopRight => (
+                Pos2::new(bbox.min.x, current_pos.y),
+                Pos2::new(current_pos.x, bbox.max.y),
+            ),
+            TransformHandle::Left => (Pos2::new(current_pos.x, bbox.min.y), bbox.max),
+            TransformHandle::Right => (bbox.min, Pos2::new(current_pos.x, bbox.max.y)),
+            TransformHandle::BottomLeft => (
+                Pos2::new(current_pos.x, bbox.min.y),
+                Pos2::new(bbox.max.x, current_pos.y),
+            ),
+            TransformHandle::Bottom => (bbox.min, Pos2::new(bbox.max.x, current_pos.y)),
+            TransformHandle::BottomRight => (bbox.min, current_pos),
+        };
+        let raw_width = (new_max.x - new_min.x).max(MIN_SIZE);
+        let raw_height = (new_max.y - new_min.y).max(MIN_SIZE);
+
+        // Aspect-preserving size, driven by the dominant axis of the drag.
+        let (width, height) = match handle {
+            TransformHandle::Left | TransformHandle::Right => {
+                let width = raw_width;
+                (width, (width / aspect_ratio).max(MIN_SIZE))
             }
-            TransformHandle::Top => {
-                let new_height = (bbox.max.y - current_pos.y).max(10.0);
-                self.size.y = new_height;
-                self.pos.y = current_pos.y;
+            TransformHandle::Top | TransformHandle::Bottom => {
+                let height = raw_height;
+                ((height * aspect_ratio).max(MIN_SIZE), height)
             }
-            TransformHandle::TopRight => {
-                let new_max = Pos2::new(current_pos.x, bbox.max.y);
-                let new_min = Pos2::new(bbox.min.x, current_pos.y);
-                let new_size = egui::vec2(
-                    (new_max.x - new_min.x).max(10.0),
-                    (new_max.y - new_min.y).max(10.0),
-                );
-                self.size = new_size;
-                self.pos.y = new_min.y;
+            _ => {
+                let scale = (raw_width / old_size.x).max(raw_height / old_size.y);
+                let width = (old_size.x * scale).max(MIN_SIZE);
+                let height = (width / aspect_ratio).max(MIN_SIZE);
+                (width, height)
             }
-            TransformHandle::Left => {
-                let new_width = (bbox.max.x - current_pos.x).max(10.0);
-                self.size.x = new_width;
-                self.pos.x = current_pos.x;
-            }
-            TransformHandle::Right => {
-                let new_width = (current_pos.x - bbox.min.x).max(10.0);
-                self.size.x = new_width;
-            }
-            TransformHandle::BottomLeft => {
-                let new_min = Pos2::new(current_pos.x, bbox.min.y);
-                let new_max = Pos2::new(bbox.max.x, current_pos.y);
-                let new_size = egui::vec2(
-                    (new_max.x - new_min.x).max(10.0),
-                    (new_max.y - new_min.y).max(10.0),
-                );
-                self.size = new_size;
-                self.pos.x = new_min.x;
-            }
-            TransformHandle::Bottom => {
-                let new_height = (current_pos.y - bbox.min.y).max(10.0);
-                self.size.y = new_height;
-            }
-            TransformHandle::BottomRight => {
-                let new_size = egui::vec2(
-                    (current_pos.x - bbox.min.x).max(10.0),
-                    (current_pos.y - bbox.min.y).max(10.0),
-                );
-                self.size = new_size;
-            }
-        }
+        };
+
+        self.size = egui::vec2(width, height);
+        self.pos = match handle {
+            // Anchor on the edge/corner opposite the dragged handle.
+            TransformHandle::TopLeft => Pos2::new(bbox.max.x - width, bbox.max.y - height),
+            TransformHandle::Top => Pos2::new(bbox.center().x - width / 2.0, bbox.max.y - height),
+            TransformHandle::TopRight => Pos2::new(bbox.min.x, bbox.max.y - height),
+            TransformHandle::Left => Pos2::new(bbox.max.x - width, bbox.center().y - height / 2.0),
+            TransformHandle::Right => Pos2::new(bbox.min.x, bbox.center().y - height / 2.0),
+            TransformHandle::BottomLeft => Pos2::new(bbox.max.x - width, bbox.min.y),
+            TransformHandle::Bottom => Pos2::new(bbox.center().x - width / 2.0, bbox.min.y),
+            TransformHandle::BottomRight => Pos2::new(bbox.min.x, bbox.min.y),
+        };
     }
 
     /// Returns the bounding rectangle of the image
@@ -1813,5 +1809,45 @@ mod tests {
         assert_eq!(state.canvas.objects.len(), original.objects.len());
         assert!(state.history.redo(&mut state.canvas));
         assert_eq!(state.canvas.objects.len(), original.objects.len() - 1);
+    }
+
+    #[test]
+    fn test_image_transform_preserves_aspect_ratio() {
+        let ctx = egui::Context::default();
+        let texture = ctx.load_texture(
+            "aspect_test",
+            egui::ColorImage::from_rgba_unmultiplied([2, 1], &[255; 8]),
+            egui::TextureOptions::LINEAR,
+        );
+        let mut image = CanvasImage {
+            texture,
+            pos: Pos2::new(0.0, 0.0),
+            size: egui::vec2(100.0, 50.0),
+            aspect_ratio: 2.0,
+            image_data: Arc::from(vec![255u8; 8].as_slice()),
+            image_size: [2, 1],
+        };
+
+        // Corner drag: anchored at the opposite corner, aspect kept.
+        image.transform(
+            TransformHandle::BottomRight,
+            egui::Vec2::ZERO,
+            Pos2::ZERO,
+            Pos2::new(200.0, 100.0),
+        );
+        let size = image.bounding_box().size();
+        assert!((size.x / size.y - 2.0).abs() < 0.01);
+        assert_eq!(image.pos, Pos2::new(0.0, 0.0));
+
+        // Edge drag: the other dimension follows to keep the aspect ratio.
+        image.transform(
+            TransformHandle::Right,
+            egui::Vec2::ZERO,
+            Pos2::ZERO,
+            Pos2::new(300.0, 50.0),
+        );
+        let size = image.bounding_box().size();
+        assert!((size.x / size.y - 2.0).abs() < 0.01);
+        assert_eq!(image.pos.x, 0.0);
     }
 }
