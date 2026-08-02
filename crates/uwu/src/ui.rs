@@ -1839,10 +1839,14 @@ pub fn ui_toolbar(
     if is_helper {
         w = w.movable(false).constrain(false).fixed_pos([10.0, 10.0]);
     } else {
-        w = w
-            .movable(true)
-            .pivot(egui::Align2::CENTER_BOTTOM)
-            .default_pos([content_rect.center().x, content_rect.max.y - 20.0]);
+        w = w.movable(true).pivot(egui::Align2::CENTER_BOTTOM);
+        if state.toolbar_user_moved {
+            // Keep the position the user dragged the toolbar to.
+            w = w.default_pos([content_rect.center().x, content_rect.max.y - 20.0]);
+        } else {
+            // Pin to the bottom-center of the screen until the user drags it.
+            w = w.current_pos([content_rect.center().x, content_rect.max.y - 20.0]);
+        }
     }
 
     let inner_response = w.show(ctx, |ui| {
@@ -1866,6 +1870,12 @@ pub fn ui_toolbar(
 
         ui_window_controls(state, ui, window);
     });
+
+    if let Some(r) = &inner_response
+        && r.response.dragged()
+    {
+        state.toolbar_user_moved = true;
+    }
 
     inner_response.map(|ir| ir.response.rect)
 }

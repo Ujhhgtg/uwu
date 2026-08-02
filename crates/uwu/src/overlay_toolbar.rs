@@ -19,6 +19,28 @@ pub struct OverlayToolbar {
     pub egui_renderer: EguiRenderer,
 }
 
+/// Bottom-center position (in logical coordinates) on the monitor that the
+/// main window currently occupies. Falls back to the primary monitor, then to
+/// the first available monitor.
+fn toolbar_bottom_center_pos(
+    main_window: &Window,
+    target_w: f64,
+    target_h: f64,
+) -> Option<LogicalPosition<f64>> {
+    let monitor = main_window
+        .current_monitor()
+        .or_else(|| main_window.primary_monitor())
+        .or_else(|| main_window.available_monitors().next());
+    let monitor = monitor?;
+    let monitor_size = monitor.size();
+    let scale = monitor.scale_factor();
+    let monitor_w = monitor_size.width as f64 / scale;
+    let monitor_h = monitor_size.height as f64 / scale;
+    let x = (monitor_w - target_w) / 2.0;
+    let y = (monitor_h - target_h - 40.0).max(0.0);
+    Some(LogicalPosition::new(x, y))
+}
+
 impl App {
     pub fn create_toolbar_window(&mut self, event_loop: &ActiveEventLoop) {
         let window_size = LogicalSize::new(1000.0, 300.0);
@@ -37,14 +59,11 @@ impl App {
             attrs = attrs.with_skip_taskbar(true);
         }
 
-        if let Some(monitor) = event_loop.primary_monitor() {
-            let monitor_size = monitor.size();
-            let scale = monitor.scale_factor();
-            let monitor_w = monitor_size.width as f64 / scale;
-            let monitor_h = monitor_size.height as f64 / scale;
-            let x = (monitor_w - window_size.width) / 2.0;
-            let y = monitor_h - window_size.height - 40.0;
-            attrs = attrs.with_position(Position::Logical(LogicalPosition::new(x, y)));
+        if let Some(main_window) = self.window.as_ref()
+            && let Some(pos) =
+                toolbar_bottom_center_pos(main_window, window_size.width, window_size.height)
+        {
+            attrs = attrs.with_position(Position::Logical(pos));
         }
 
         let window = event_loop.create_window(attrs).unwrap();
@@ -227,21 +246,14 @@ error: failed to enable premultiplied alpha for toolbar window: {:?}
                 let _ = toolbar
                     .window
                     .request_inner_size(LogicalSize::new(target_w, target_h));
-                if let Some(monitor) = toolbar
-                    .window
-                    .current_monitor()
-                    .or_else(|| toolbar.window.primary_monitor())
-                {
-                    let monitor_size = monitor.size();
-                    let scale = monitor.scale_factor();
-                    let monitor_w = monitor_size.width as f64 / scale;
-                    let monitor_h = monitor_size.height as f64 / scale;
-                    let x = (monitor_w - target_w) / 2.0;
-                    let y = monitor_h - target_h - 40.0;
-                    toolbar
-                        .window
-                        .set_outer_position(Position::Logical(LogicalPosition::new(x, y)));
-                }
+            }
+            // Keep the toolbar pinned to the bottom-center of the main
+            // window's monitor (the helper window has no decorations, so it
+            // cannot be moved by the user).
+            if let Some(main_window) = self.window.as_ref()
+                && let Some(pos) = toolbar_bottom_center_pos(main_window, target_w, target_h)
+            {
+                toolbar.window.set_outer_position(Position::Logical(pos));
             }
         }
 

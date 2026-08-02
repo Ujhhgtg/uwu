@@ -1456,6 +1456,9 @@ pub struct AppState {
     pub show_size_preview: bool,
     pub new_text_content: String,
     pub should_quit: bool,
+    /// Whether the user has dragged the main toolbar away from its default
+    /// bottom-center position in this session.
+    pub toolbar_user_moved: bool,
     /// First generic exit request (Esc / window close) timestamp; a second
     /// request inside [`EXIT_CONFIRM_TIMEOUT`] confirms the exit.
     pub exit_confirm_armed_at: Option<Instant>,
@@ -1517,6 +1520,7 @@ impl Default for AppState {
             show_size_preview: false,
             fps_counter: FpsCounter::new(),
             should_quit: false,
+            toolbar_user_moved: false,
             new_text_content: "".to_string(),
             fullscreen_video_modes: Vec::new(),
             exit_confirm_armed_at: None,
