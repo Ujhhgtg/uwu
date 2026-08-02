@@ -593,7 +593,18 @@ impl PageState {
         out.extend_from_slice(&header);
         out.extend_from_slice(payload.as_slice());
 
-        std::fs::write(path, out)?;
+        // Write to a temporary file in the same directory and rename it, so a
+        // crash mid-write cannot leave a truncated/corrupt canvas file.
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("canvas.owo");
+        let tmp_path = path.with_file_name(format!("{file_name}.tmp"));
+        std::fs::write(&tmp_path, out)?;
+        if let Err(err) = std::fs::rename(&tmp_path, path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(err.into());
+        }
         Ok(())
     }
 
