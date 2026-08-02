@@ -1587,16 +1587,6 @@ fn ui_toolbar_tools_content(
                 if let Some(path) = path {
                     match image::open(path) {
                         Ok(img) => {
-                            const MAX_TEXTURE_SIZE: u32 = 2048;
-
-                            let img = if img.width() > MAX_TEXTURE_SIZE
-                                || img.height() > MAX_TEXTURE_SIZE
-                            {
-                                utils::resize_image_for_texture(img, MAX_TEXTURE_SIZE)
-                            } else {
-                                img
-                            };
-
                             let img_rgba = img.to_rgba8();
                             let (width, height) = img_rgba.dimensions();
                             let aspect_ratio = width as f32 / height as f32;
@@ -1605,14 +1595,10 @@ fn ui_toolbar_tools_content(
                             let target_height = target_width / aspect_ratio;
 
                             let ctx = ui.ctx();
-                            let texture = ctx.load_texture(
-                                "inserted_image",
-                                egui::ColorImage::from_rgba_unmultiplied(
-                                    [width as usize, height as usize],
-                                    &img_rgba,
-                                ),
-                                egui::TextureOptions::LINEAR,
-                            );
+                            // Keep the original pixels for export/save; only the
+                            // GPU texture is downscaled for display.
+                            let texture =
+                                utils::create_display_texture(ctx, &img_rgba, width, height);
 
                             let image_data: Arc<[u8]> = img_rgba.into_raw().into();
                             // Place the image centered on the current view center.

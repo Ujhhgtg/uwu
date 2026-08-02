@@ -268,6 +268,38 @@ pub fn resize_image_for_texture(image: DynamicImage, max_texture_size: u32) -> D
     )
 }
 
+/// Maximum texture dimension used for GPU display. Original pixels are kept
+/// separately for export, undo, and canvas files.
+pub const MAX_TEXTURE_SIZE: u32 = 2048;
+
+/// Creates a GPU texture from full-resolution RGBA data, downscaling only the
+/// pixels uploaded to the GPU. The source `rgba` buffer is left untouched so
+/// the original image detail survives display, export, and saving.
+pub fn create_display_texture(
+    ctx: &egui::Context,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> egui::TextureHandle {
+    let (tex_data, tex_w, tex_h) = if width > MAX_TEXTURE_SIZE || height > MAX_TEXTURE_SIZE {
+        let img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
+            .expect("invalid rgba dimensions for display texture");
+        let resized =
+            resize_image_for_texture(image::DynamicImage::ImageRgba8(img), MAX_TEXTURE_SIZE);
+        let rgba = resized.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        (rgba.into_raw(), w, h)
+    } else {
+        (rgba.to_vec(), width, height)
+    };
+
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+        [tex_w as usize, tex_h as usize],
+        &tex_data,
+    );
+    ctx.load_texture("canvas_image", color_image, egui::TextureOptions::LINEAR)
+}
+
 pub fn get_default_quick_colors() -> Vec<Color32> {
     vec![
         Color32::from_rgb(0, 0, 0),       // 黑色 - Primary text and outlines
