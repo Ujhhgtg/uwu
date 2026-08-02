@@ -1594,9 +1594,14 @@ fn ui_toolbar_tools_content(
                             );
 
                             let image_data: Arc<[u8]> = img_rgba.into_raw().into();
+                            // Place the image centered on the current view center.
+                            let canvas_center =
+                                ctx.content_rect().center() / state.view_zoom + state.view_offset;
+                            let pos =
+                                canvas_center - egui::vec2(target_width / 2.0, target_height / 2.0);
                             let new_image = CanvasImage {
                                 texture,
-                                pos: Pos2::new(100.0, 100.0),
+                                pos,
                                 size: egui::vec2(target_width, target_height),
                                 aspect_ratio,
 
@@ -1716,9 +1721,13 @@ fn ui_toolbar_tools_content(
                                 Color32::WHITE,
                             )
                             .size();
+                        // Place the text centered on the current view center.
+                        let canvas_center =
+                            ui.ctx().content_rect().center() / state.view_zoom + state.view_offset;
+                        let pos = canvas_center - text_size / 2.0;
                         let new_text = CanvasText {
                             text: state.new_text_content.clone(),
-                            pos: Pos2::new(100.0, 100.0),
+                            pos,
                             color: Color32::WHITE,
                             font_size: 16.0,
 
