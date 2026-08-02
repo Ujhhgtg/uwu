@@ -2513,17 +2513,56 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
             }
 
             CanvasTool::ObjectEraser => {
-                let eraser_positions: Vec<Pos2> = if has_touch {
-                    state
-                        .pointers
-                        .values()
-                        .filter(|p| matches!(p.interaction, PointerInteraction::Erasing { .. }))
-                        .map(|p| p.pos)
-                        .collect()
-                } else if response.drag_started() || response.clicked() || response.dragged() {
-                    canvas_pos.into_iter().collect()
-                } else {
-                    vec![]
+                if !has_touch {
+                    if response.drag_started() || response.clicked() {
+                        if let Some(pos) = canvas_pos {
+                            state.pointers.insert(
+                                0,
+                                PointerState {
+                                    id: 0,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::Erasing {
+                                        original_objects: Vec::new(),
+                                        modified: false,
+                                    },
+                                },
+                            );
+                        }
+                    } else if response.dragged() {
+                        if let Some(pointer) = state.pointers.get_mut(&0)
+                            && matches!(pointer.interaction, PointerInteraction::Erasing { .. })
+                            && let Some(pos) = canvas_pos
+                        {
+                            pointer.pos = pos;
+                        }
+                    } else {
+                        state.pointers.remove(&0);
+                    }
+                }
+
+                // Interpolate between the previous and current pointer position
+                // so a fast swipe does not skip objects between frames.
+                let eraser_positions: Vec<Pos2> = {
+                    let mut positions = Vec::new();
+                    for pointer in state.pointers.values() {
+                        if !matches!(pointer.interaction, PointerInteraction::Erasing { .. }) {
+                            continue;
+                        }
+                        if let Some(prev) = pointer.prev_pos {
+                            let dist = prev.distance(pointer.pos);
+                            let step = state.eraser_size * 0.5;
+                            if dist > step {
+                                let num_steps = (dist / step).ceil() as usize;
+                                for j in 1..num_steps {
+                                    let t = j as f32 / num_steps as f32;
+                                    positions.push(prev.lerp(pointer.pos, t));
+                                }
+                            }
+                        }
+                        positions.push(pointer.pos);
+                    }
+                    positions
                 };
 
                 for pos in eraser_positions {
@@ -2568,6 +2607,12 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             let object = state.canvas.objects.remove(i);
                             state.history.save_remove_object(i, object);
                         }
+                    }
+                }
+
+                for pointer in state.pointers.values_mut() {
+                    if matches!(pointer.interaction, PointerInteraction::Erasing { .. }) {
+                        pointer.prev_pos = Some(pointer.pos);
                     }
                 }
             }
