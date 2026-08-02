@@ -2560,9 +2560,14 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             }
                         }
                     }
-                    for i in to_remove {
-                        let object = state.canvas.objects.remove(i);
-                        state.history.save_remove_object(i, object);
+                    if !to_remove.is_empty() {
+                        // Indices in the selection become stale once objects
+                        // are removed; clear it so no wrong object is targeted.
+                        state.clear_selection();
+                        for i in to_remove {
+                            let object = state.canvas.objects.remove(i);
+                            state.history.save_remove_object(i, object);
+                        }
                     }
                 }
             }
@@ -2754,6 +2759,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 }
 
                 if any_modified {
+                    state.clear_selection();
                     for pointer in state.pointers.values_mut() {
                         if let PointerInteraction::Erasing { modified, .. } =
                             &mut pointer.interaction
