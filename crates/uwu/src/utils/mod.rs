@@ -327,9 +327,9 @@ pub fn open_with_default_app(path: &std::path::Path) -> std::io::Result<()> {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
 
-        use windows::Win32::UI::Shell::ShellExecuteW;
-        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-        use windows::core::PCWSTR;
+        use ::windows::Win32::UI::Shell::ShellExecuteW;
+        use ::windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        use ::windows::core::PCWSTR;
 
         let file_w: Vec<u16> = OsStr::new(path)
             .encode_wide()
